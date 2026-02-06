@@ -91,8 +91,35 @@ module.exports.loop = function () {
       const newBody = getBody(energyToUse, "hauler");
       const newName = "Hauler" + Game.time;
       console.log("正在孵化新搬运工: " + newName + " (" + newBody + ")");
+
+      // 均衡分配 Source 给 Hauler
+      const sources = spawn.room.find(FIND_SOURCES);
+      const haulers = spawn.room.find(FIND_MY_CREEPS, {
+        filter: (c) => c.memory.role === "hauler",
+      });
+
+      // 统计每个 Source 的 Hauler 数量
+      const sourceCounts = {};
+      sources.forEach((s) => (sourceCounts[s.id] = 0));
+      haulers.forEach((c) => {
+        if (c.memory.sourceId) {
+          sourceCounts[c.memory.sourceId] =
+            (sourceCounts[c.memory.sourceId] || 0) + 1;
+        }
+      });
+
+      // 找最少的
+      let bestSource = sources[0];
+      let minCount = 9999;
+      sources.forEach((s) => {
+        if (sourceCounts[s.id] < minCount) {
+          minCount = sourceCounts[s.id];
+          bestSource = s;
+        }
+      });
+
       spawn.spawnCreep(newBody, newName, {
-        memory: { role: "hauler" },
+        memory: { role: "hauler", sourceId: bestSource.id },
       });
     } else if (counts.upgrader < TARGETS.upgrader) {
       const newBody = getBody(energyToUse, "upgrader");

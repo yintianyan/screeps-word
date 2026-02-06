@@ -37,14 +37,19 @@ const roleBuilder = {
       // 2. 其次建造
       const targets = creep.room.find(FIND_CONSTRUCTION_SITES);
       if (targets.length) {
-        // 优先建造 Extension 和 Container
-        const criticalTargets = targets.filter(
-          (s) =>
-            s.structureType === STRUCTURE_EXTENSION ||
-            s.structureType === STRUCTURE_CONTAINER,
-        );
-        const target =
-          criticalTargets.length > 0 ? criticalTargets[0] : targets[0];
+        // 优先建造 Container (关键！确保矿区和Controller附近的Container被优先建造)
+        // 其次 Extension
+        const containers = targets.filter(s => s.structureType === STRUCTURE_CONTAINER);
+        const extensions = targets.filter(s => s.structureType === STRUCTURE_EXTENSION);
+        
+        let target = null;
+        if (containers.length > 0) {
+            target = creep.pos.findClosestByPath(containers);
+        } else if (extensions.length > 0) {
+            target = creep.pos.findClosestByPath(extensions);
+        } else {
+            target = targets[0]; // 其他建筑 (Road, Tower, etc.)
+        }
 
         if (creep.build(target) == ERR_NOT_IN_RANGE) {
           moveModule.smartMove(creep, target, {

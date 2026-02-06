@@ -119,26 +119,63 @@ const roleHauler = {
 
       // 0. 优先从 Mining Container 取货 (如果有能量)
       // 必须是 Source 附近的 Container，或者是 Spawn 附近的 Container (如果是空的 Spawn 需要补充？暂时不考虑)
-      const containers = creep.room.find(FIND_STRUCTURES, {
-        filter: (s) =>
-          s.structureType === STRUCTURE_CONTAINER &&
-          s.store[RESOURCE_ENERGY] > 50 &&
-          s.pos.findInRange(FIND_SOURCES, 2).length > 0, // 必须是 Mining Container
-      });
-      if (containers.length > 0) {
-        const target = creep.pos.findClosestByPath(containers);
-        if (creep.withdraw(target, RESOURCE_ENERGY) == ERR_NOT_IN_RANGE) {
-          moveModule.smartMove(creep, target, {
+
+      // 如果分配了 Source ID，优先去该 Source 附近的 Container
+      let targetContainer = null;
+      if (creep.memory.sourceId) {
+        const source = Game.getObjectById(creep.memory.sourceId);
+        if (source) {
+          const containers = source.pos.findInRange(FIND_STRUCTURES, 2, {
+            filter: (s) =>
+              s.structureType === STRUCTURE_CONTAINER &&
+              s.store[RESOURCE_ENERGY] > 50,
+          });
+          if (containers.length > 0) {
+            targetContainer = containers[0];
+          }
+        }
+      }
+
+      // 如果没有分配 Source ID 或者分配的 Source 附近没有 Container，则找任意 Mining Container
+      if (!targetContainer) {
+        const containers = creep.room.find(FIND_STRUCTURES, {
+          filter: (s) =>
+            s.structureType === STRUCTURE_CONTAINER &&
+            s.store[RESOURCE_ENERGY] > 50 &&
+            s.pos.findInRange(FIND_SOURCES, 2).length > 0, // 必须是 Mining Container
+        });
+        if (containers.length > 0) {
+          targetContainer = creep.pos.findClosestByPath(containers);
+        }
+      }
+
+      if (targetContainer) {
+        if (
+          creep.withdraw(targetContainer, RESOURCE_ENERGY) == ERR_NOT_IN_RANGE
+        ) {
+          moveModule.smartMove(creep, targetContainer, {
             visualizePathStyle: { stroke: "#ffaa00" },
           });
         }
         return;
       }
 
-      // 1. 掉落的资源
-      const droppedResources = creep.room.find(FIND_DROPPED_RESOURCES, {
-        filter: (resource) => resource.resourceType == RESOURCE_ENERGY,
-      });
+      // 1. 掉落的资源 (优先捡自己 Source 附近的)
+      let droppedResources = [];
+      if (creep.memory.sourceId) {
+        const source = Game.getObjectById(creep.memory.sourceId);
+        if (source) {
+          droppedResources = source.pos.findInRange(FIND_DROPPED_RESOURCES, 3, {
+            filter: (resource) => resource.resourceType == RESOURCE_ENERGY,
+          });
+        }
+      }
+
+      if (droppedResources.length === 0) {
+        droppedResources = creep.room.find(FIND_DROPPED_RESOURCES, {
+          filter: (resource) => resource.resourceType == RESOURCE_ENERGY,
+        });
+      }
 
       if (droppedResources.length > 0) {
         const target = creep.pos.findClosestByPath(droppedResources);
