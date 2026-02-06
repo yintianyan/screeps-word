@@ -13,6 +13,16 @@ const roleHauler = {
       creep.say("🚚 haul");
     }
 
+    // === 紧急填充逻辑 ===
+    // 如果 Spawn/Extension 没满，且自己身上有能量（哪怕没满），强制切换到送货模式
+    // 避免看着 Spawn 饿死而自己还在捡垃圾
+    if (!creep.memory.hauling && creep.store[RESOURCE_ENERGY] > 0) {
+      if (creep.room.energyAvailable < creep.room.energyCapacityAvailable) {
+        creep.memory.hauling = true;
+        creep.say("🚨 rescue");
+      }
+    }
+
     if (creep.memory.hauling) {
       // 1. 优先填充 Spawn 和 Extension
       let targets = creep.room.find(FIND_STRUCTURES, {
@@ -146,6 +156,46 @@ const roleHauler = {
         });
         if (containers.length > 0) {
           targetContainer = creep.pos.findClosestByPath(containers);
+        }
+      }
+
+      // === 紧急取货逻辑 ===
+      // 如果 Spawn 没满，且 Mining Container 没货，允许从 Storage 或 General Container 取货
+      if (
+        !targetContainer &&
+        creep.room.energyAvailable < creep.room.energyCapacityAvailable
+      ) {
+        // 找 Storage
+        if (
+          creep.room.storage &&
+          creep.room.storage.store[RESOURCE_ENERGY] > 0
+        ) {
+          // 只有当 Storage 能量充足或者非常紧急时才取
+          if (
+            creep.room.storage.store[RESOURCE_ENERGY] > 500 ||
+            creep.room.energyAvailable < 300
+          ) {
+            if (
+              creep.withdraw(creep.room.storage, RESOURCE_ENERGY) ==
+              ERR_NOT_IN_RANGE
+            ) {
+              moveModule.smartMove(creep, creep.room.storage, {
+                visualizePathStyle: { stroke: "#ffaa00" },
+              });
+            }
+            return;
+          }
+        }
+
+        // 找 General Container (非 Mining)
+        const generalContainers = creep.room.find(FIND_STRUCTURES, {
+          filter: (s) =>
+            s.structureType === STRUCTURE_CONTAINER &&
+            s.store[RESOURCE_ENERGY] > 50 &&
+            s.pos.findInRange(FIND_SOURCES, 2).length === 0,
+        });
+        if (generalContainers.length > 0) {
+          targetContainer = creep.pos.findClosestByPath(generalContainers);
         }
       }
 
