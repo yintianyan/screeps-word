@@ -34,6 +34,12 @@ module.exports.loop = function () {
   for (const name in creeps) {
     const creep = creeps[name];
     if (counts[creep.memory.role] !== undefined) {
+      // 提前孵化逻辑：
+      // 如果 Creep 存活时间少于 100 tick（且不是正在孵化的），则不计入当前数量。
+      // 这样 Spawn 会认为人手不足，提前开始孵化继任者。
+      if (!creep.spawning && creep.ticksToLive < 100) {
+        continue;
+      }
       counts[creep.memory.role]++;
     }
   }
