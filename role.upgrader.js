@@ -19,6 +19,26 @@ const roleUpgrader = {
         });
       }
     } else {
+      // 优先从 Controller Container 取能量 (距离 Controller Range 3 以内的 Container)
+      const container = creep.room.controller.pos.findInRange(
+        FIND_STRUCTURES,
+        3,
+        {
+          filter: (s) =>
+            s.structureType === STRUCTURE_CONTAINER &&
+            s.store[RESOURCE_ENERGY] > 0,
+        },
+      )[0];
+
+      if (container) {
+        if (creep.withdraw(container, RESOURCE_ENERGY) == ERR_NOT_IN_RANGE) {
+          moveModule.smartMove(creep, container, {
+            visualizePathStyle: { stroke: "#ffaa00" },
+          });
+        }
+        return;
+      }
+
       if (!creep.memory.sourceId) {
         const sources = creep.room.find(FIND_SOURCES);
         if (sources.length > 0) {

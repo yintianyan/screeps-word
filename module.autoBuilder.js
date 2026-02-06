@@ -114,6 +114,26 @@ const autoBuilder = {
                     }
                 }
             }
+
+            // 4.2 自动建造 General Container (Spawn 附近，作为中转站)
+            // 在 Spawn 附近 Range 2 的位置
+            const spawnNearby = spawn.pos.findInRange(FIND_STRUCTURES, 2, {
+                filter: s => s.structureType === STRUCTURE_CONTAINER
+            });
+            const spawnNearbySites = spawn.pos.findInRange(FIND_MY_CONSTRUCTION_SITES, 2, {
+                filter: s => s.structureType === STRUCTURE_CONTAINER
+            });
+            
+            if (spawnNearby.length === 0 && spawnNearbySites.length === 0) {
+                // 简单的找个空地
+                const targetX = spawn.pos.x;
+                const targetY = spawn.pos.y + 2; // 下方两格
+                // 检查地形
+                const terrain = room.getTerrain().get(targetX, targetY);
+                if (terrain !== TERRAIN_MASK_WALL) {
+                    room.createConstructionSite(targetX, targetY, STRUCTURE_CONTAINER);
+                }
+            }
         }
 
         // 5. 自动建造 Tower (在 Spawn 附近)
