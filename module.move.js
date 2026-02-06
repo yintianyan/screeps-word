@@ -26,8 +26,28 @@ const moveModule = {
         // 默认忽略 creeps (这样路径会优先选择 Road)
         let ignore = true;
         
-        // 如果连续卡住 2 tick，说明撞车了，临时开启避让模式
+        // 如果连续卡住 2 tick，说明撞车了
         if (creep.memory._move.stuckCount >= 2) {
+            // 尝试与面前的 Creep 交换位置 (Swap)
+            // 找到移动方向
+            const path = creep.pos.findPathTo(target, {ignoreCreeps: true, range: opts.range || 1});
+            if (path.length > 0) {
+                const nextStep = path[0];
+                const obstacle = creep.room.lookForAt(LOOK_CREEPS, nextStep.x, nextStep.y)[0];
+                
+                if (obstacle && obstacle.my) {
+                    // 如果对方是己方 Creep，尝试让它让路或交换
+                    // 简单的交换逻辑：让对方往我这边走一步
+                    obstacle.move(obstacle.pos.getDirectionTo(creep));
+                    creep.move(creep.pos.getDirectionTo(obstacle));
+                    
+                    // 重置卡住计数，避免一直在这里纠缠
+                    creep.memory._move.stuckCount = 0;
+                    return; // 这一 tick 已经操作过了
+                }
+            }
+
+            // 如果交换失败（例如对方不是 Creep 或者是敌人的），则开启避让模式
             ignore = false;
         }
 
