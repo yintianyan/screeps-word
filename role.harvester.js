@@ -25,6 +25,17 @@ const roleHarvester = {
         delete creep.memory.sourceId;
       }
     } else {
+      // 优先把能量传给附近的 Hauler
+      const nearbyHauler = creep.pos.findInRange(FIND_MY_CREEPS, 1, {
+        filter: (c) =>
+          c.memory.role === "hauler" && c.store.getFreeCapacity() > 0,
+      })[0];
+
+      if (nearbyHauler) {
+        creep.transfer(nearbyHauler, RESOURCE_ENERGY);
+        return;
+      }
+
       const targets = creep.room.find(FIND_STRUCTURES, {
         filter: (structure) => {
           return (
