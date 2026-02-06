@@ -83,13 +83,61 @@ const autoBuilder = {
                 });
 
                 if (nearby.length === 0 && nearbySites.length === 0) {
-                    // 找到路径上的第一个点（即紧邻 Source 的点）作为 Container 位置
-                    const path = spawn.pos.findPathTo(source, {ignoreCreeps: true});
-                    if (path.length > 0) {
-                        const lastStep = path[path.length - 2]; // 倒数第二个点是紧邻 Source 的点 (path 终点是 Source 本身吗？findPathTo 终点是目标 adjacent)
-                        // findPathTo 默认 range 是 1，所以 path 的最后一个点就是 Source 旁边的点
-                        const containerPos = path[path.length - 1];
-                        room.createConstructionSite(containerPos.x, containerPos.y, STRUCTURE_CONTAINER);
+                    // 智能选择最佳位置
+                    let bestPos = null;
+                    let bestScore = -9999;
+
+                    // 遍历 Source 周围 8 个格子
+                    for (let x = -1; x <= 1; x++) {
+                        for (let y = -1; y <= 1; y++) {
+                            if (x === 0 && y === 0) continue;
+                            
+                            const posX = source.pos.x + x;
+                            const posY = source.pos.y + y;
+                            
+                            // 检查地形
+                            const terrain = room.getTerrain().get(posX, posY);
+                            if (terrain === TERRAIN_MASK_WALL) continue;
+
+                            const pos = new RoomPosition(posX, posY, room.name);
+                            
+                            // 评分标准：
+                            // 1. 距离 Spawn 近 (权重高)
+                            // 2. 是平原 (Plain) 而不是沼泽 (Swamp)
+                            // 3. 周围空地多 (方便 Hauler 进出)
+                            
+                            let score = 0;
+                            
+                            // 距离分 (越近越好，取负数)
+                            const path = pos.findPathTo(spawn, {ignoreCreeps: true, range: 1});
+                            if (path.length === 0) continue; // 不可达
+                            score -= path.length * 2;
+
+                            // 地形分
+                            if (terrain === 0) score += 5; // Plain
+                            if (terrain === TERRAIN_MASK_SWAMP) score -= 5; // Swamp
+
+                            // 可达性分 (周围有多少个非墙格子)
+                            let openNeighbors = 0;
+                            for (let dx = -1; dx <= 1; dx++) {
+                                for (let dy = -1; dy <= 1; dy++) {
+                                    if (dx === 0 && dy === 0) continue;
+                                    if (room.getTerrain().get(posX + dx, posY + dy) !== TERRAIN_MASK_WALL) {
+                                        openNeighbors++;
+                                    }
+                                }
+                            }
+                            score += openNeighbors;
+
+                            if (score > bestScore) {
+                                bestScore = score;
+                                bestPos = pos;
+                            }
+                        }
+                    }
+
+                    if (bestPos) {
+                        room.createConstructionSite(bestPos.x, bestPos.y, STRUCTURE_CONTAINER);
                     }
                 }
             });
