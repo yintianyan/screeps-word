@@ -17,8 +17,26 @@ const roleHarvester = {
 
       const source = Game.getObjectById(creep.memory.sourceId);
       if (source) {
-        if (creep.harvest(source) == ERR_NOT_IN_RANGE) {
-          creep.moveTo(source, { visualizePathStyle: { stroke: "#ffaa00" } });
+        // 尝试寻找该 source 附近的 Container
+        const containers = source.pos.findInRange(FIND_STRUCTURES, 1, {
+          filter: (s) => s.structureType === STRUCTURE_CONTAINER,
+        });
+        const container = containers.length > 0 ? containers[0] : null;
+
+        // 如果有 Container，就站在 Container 上挖
+        if (container) {
+          if (!creep.pos.isEqualTo(container.pos)) {
+            creep.moveTo(container, {
+              visualizePathStyle: { stroke: "#ffaa00" },
+            });
+          } else {
+            creep.harvest(source);
+          }
+        } else {
+          // 没有 Container，就正常走过去挖
+          if (creep.harvest(source) == ERR_NOT_IN_RANGE) {
+            creep.moveTo(source, { visualizePathStyle: { stroke: "#ffaa00" } });
+          }
         }
       } else {
         // 如果找不到 source (可能是 id 变了或者视野问题)，清除 memory 让它重新找

@@ -11,10 +11,41 @@ const roleBuilder = {
     }
 
     if (creep.memory.building) {
+      // 1. 优先维修：如果路上有损坏严重的建筑（耐久 < 50%），优先维修
+      // 特别是 Container 和 Road
+      const repairTargets = creep.room.find(FIND_STRUCTURES, {
+        filter: (object) =>
+          (object.structureType === STRUCTURE_CONTAINER ||
+            object.structureType === STRUCTURE_ROAD) &&
+          object.hits < object.hitsMax * 0.5,
+      });
+
+      // 按损坏程度排序，优先修最烂的
+      repairTargets.sort((a, b) => a.hits / a.hitsMax - b.hits / b.hitsMax);
+
+      if (repairTargets.length > 0) {
+        if (creep.repair(repairTargets[0]) == ERR_NOT_IN_RANGE) {
+          creep.moveTo(repairTargets[0], {
+            visualizePathStyle: { stroke: "#ff0000" },
+          });
+        }
+        return; // 如果在维修，就不去建造了
+      }
+
+      // 2. 其次建造
       const targets = creep.room.find(FIND_CONSTRUCTION_SITES);
       if (targets.length) {
-        if (creep.build(targets[0]) == ERR_NOT_IN_RANGE) {
-          creep.moveTo(targets[0], {
+        // 优先建造 Extension 和 Container
+        const criticalTargets = targets.filter(
+          (s) =>
+            s.structureType === STRUCTURE_EXTENSION ||
+            s.structureType === STRUCTURE_CONTAINER,
+        );
+        const target =
+          criticalTargets.length > 0 ? criticalTargets[0] : targets[0];
+
+        if (creep.build(target) == ERR_NOT_IN_RANGE) {
+          creep.moveTo(target, {
             visualizePathStyle: { stroke: "#ffffff" },
           });
         }

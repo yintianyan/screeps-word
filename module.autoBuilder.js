@@ -70,6 +70,44 @@ const autoBuilder = {
                 }
             }
         }
+        // 4. 自动建造 Container (在 Source 旁边)
+        // 只有 RCL >= 2 才能造 Container
+        if (currentRCL >= 2) {
+            sources.forEach(source => {
+                // 检查 Source 周围 1 格内是否已有 Container 或工地
+                const nearby = source.pos.findInRange(FIND_STRUCTURES, 1, {
+                    filter: s => s.structureType === STRUCTURE_CONTAINER
+                });
+                const nearbySites = source.pos.findInRange(FIND_MY_CONSTRUCTION_SITES, 1, {
+                    filter: s => s.structureType === STRUCTURE_CONTAINER
+                });
+
+                if (nearby.length === 0 && nearbySites.length === 0) {
+                    // 找到路径上的第一个点（即紧邻 Source 的点）作为 Container 位置
+                    const path = spawn.pos.findPathTo(source, {ignoreCreeps: true});
+                    if (path.length > 0) {
+                        const lastStep = path[path.length - 2]; // 倒数第二个点是紧邻 Source 的点 (path 终点是 Source 本身吗？findPathTo 终点是目标 adjacent)
+                        // findPathTo 默认 range 是 1，所以 path 的最后一个点就是 Source 旁边的点
+                        const containerPos = path[path.length - 1];
+                        room.createConstructionSite(containerPos.x, containerPos.y, STRUCTURE_CONTAINER);
+                    }
+                }
+            });
+        }
+
+        // 5. 自动建造 Tower (在 Spawn 附近)
+        // RCL 3 解锁 Tower
+        if (currentRCL >= 3) {
+            const towers = room.find(FIND_MY_STRUCTURES, {filter: s => s.structureType === STRUCTURE_TOWER});
+            const towerSites = room.find(FIND_MY_CONSTRUCTION_SITES, {filter: s => s.structureType === STRUCTURE_TOWER});
+            
+            if (towers.length + towerSites.length < 1) { // 暂时只造 1 个
+                 // 在 Spawn 附近找个位置 (例如 x+2, y+2)
+                 const targetX = spawn.pos.x + 2;
+                 const targetY = spawn.pos.y + 2;
+                 room.createConstructionSite(targetX, targetY, STRUCTURE_TOWER);
+            }
+        }
     }
 };
 

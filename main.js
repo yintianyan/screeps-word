@@ -4,6 +4,7 @@ const roleBuilder = require("role.builder");
 const roleHauler = require("role.hauler");
 const autoBuilder = require("module.autoBuilder");
 const populationModule = require("module.population");
+const towerModule = require("module.tower");
 
 module.exports.loop = function () {
   // 1. 清理内存：删除死亡 Creep 的内存
@@ -17,6 +18,7 @@ module.exports.loop = function () {
   // 运行自动建设模块
   if (Game.spawns["Spawn1"]) {
     autoBuilder.run(Game.spawns["Spawn1"].room);
+    towerModule.run(Game.spawns["Spawn1"].room);
   }
 
   // 2. 孵化逻辑

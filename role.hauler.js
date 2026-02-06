@@ -57,6 +57,18 @@ const roleHauler = {
         else {
             // 寻找能量来源：掉落的资源 > 墓碑 > 废墟
             
+            // 0. 优先从 Container 取货 (如果有能量)
+            const containers = creep.room.find(FIND_STRUCTURES, {
+                filter: (s) => s.structureType === STRUCTURE_CONTAINER && s.store[RESOURCE_ENERGY] > 50
+            });
+            if (containers.length > 0) {
+                 const target = creep.pos.findClosestByPath(containers);
+                 if(creep.withdraw(target, RESOURCE_ENERGY) == ERR_NOT_IN_RANGE) {
+                     creep.moveTo(target, {visualizePathStyle: {stroke: '#ffaa00'}});
+                 }
+                 return;
+            }
+
             // 1. 掉落的资源
             const droppedResources = creep.room.find(FIND_DROPPED_RESOURCES, {
                 filter: (resource) => resource.resourceType == RESOURCE_ENERGY
