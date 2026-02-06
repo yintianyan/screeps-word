@@ -93,6 +93,27 @@ const autoBuilder = {
                     }
                 }
             });
+
+            // 4.1 自动建造 Controller Container (用于升级)
+            // 只有当 Controller 等级足够高时才需要 (比如 RCL 2)
+            if (room.controller) {
+                const nearby = room.controller.pos.findInRange(FIND_STRUCTURES, 3, {
+                    filter: s => s.structureType === STRUCTURE_CONTAINER
+                });
+                const nearbySites = room.controller.pos.findInRange(FIND_MY_CONSTRUCTION_SITES, 3, {
+                    filter: s => s.structureType === STRUCTURE_CONTAINER
+                });
+
+                if (nearby.length === 0 && nearbySites.length === 0) {
+                    // 找到通往 Controller 的路径，在距离 2-3 格的位置放 Container
+                    // 这样 Upgrader 可以站在 Container 上或旁边升级
+                    const path = spawn.pos.findPathTo(room.controller, {ignoreCreeps: true, range: 2});
+                    if (path.length > 0) {
+                        const containerPos = path[path.length - 1];
+                        room.createConstructionSite(containerPos.x, containerPos.y, STRUCTURE_CONTAINER);
+                    }
+                }
+            }
         }
 
         // 5. 自动建造 Tower (在 Spawn 附近)
