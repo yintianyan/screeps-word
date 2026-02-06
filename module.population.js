@@ -19,8 +19,8 @@ const populationModule = {
 
     if (haulers.length > 0) {
       // 有搬运工，Harvester 只需要负责挖
-      // 由于 Static Mining 会占据矿位，我们严格限制 1:1，避免拥堵
-      targets.harvester = sourceCount;
+      // 用户要求每个 Source 2 人
+      targets.harvester = sourceCount * 2;
     } else {
       // 没搬运工，优先保证每个 Source 有一个 Harvester，然后立刻孵化 Hauler
       targets.harvester = sourceCount;
@@ -37,9 +37,10 @@ const populationModule = {
       0,
     );
 
-    // 基础 Hauler：和 Harvester 数量一致（或者至少等于 Source 数量）
-    // 考虑到 Harvester 可能会有冗余（Source+1），Hauler 保持一致比较安全
-    targets.hauler = targets.harvester;
+    // 基础 Hauler：现在 Harvester 翻倍了，但产出没变，所以 Hauler 不需要翻倍
+    // 保持每个 Source 至少有 1 个 Hauler，如果路途遥远或者产出快，可以适当增加
+    // 这里设定为 Source 数量 + 1 (冗余)
+    targets.hauler = sourceCount + 1;
 
     // 如果掉落能量很多 (>1000)，额外增加 Hauler 抢救
     if (totalDropped > 1000) {

@@ -54,21 +54,53 @@ const roleHarvester = {
       });
       const container = containers.length > 0 ? containers[0] : null;
 
+      // 目标挖掘位置
+      let harvestPos = null;
+
+      // 1. 优先考虑 Container 位置
       if (container) {
-        // 如果有 Container，必须站在 Container 上
-        if (!creep.pos.isEqualTo(container.pos)) {
-          moveModule.smartMove(creep, container, {
-            visualizePathStyle: { stroke: "#ffaa00" },
-          });
-        } else {
-          creep.harvest(source);
+        // 检查 Container 上是否有人
+        const creepsOnContainer = container.pos.lookFor(LOOK_CREEPS);
+
+        // 如果没人，或者就是我自己，或者那个位置的人马上就要死了（这里简单判断没人或自己）
+        if (
+          creepsOnContainer.length === 0 ||
+          creepsOnContainer[0].name === creep.name
+        ) {
+          harvestPos = container.pos;
         }
-      } else {
-        // 如果没有 Container，站在 Source 旁边即可
-        if (creep.harvest(source) == ERR_NOT_IN_RANGE) {
-          moveModule.smartMove(creep, source, {
-            visualizePathStyle: { stroke: "#ffaa00" },
-          });
+      }
+
+      // 2. 如果 Container 被占用（或者没有 Container），找 Source 旁边其他空位
+      if (!harvestPos) {
+        // 如果我已经站在 Source 旁边了，就不用动了
+        if (creep.pos.isNearTo(source)) {
+          harvestPos = creep.pos;
+        } else {
+          // 否则找一个可用的空位
+          // 这里简单地走向 Source，module.move 会自动处理路径，找一个能到的 Range 1
+          harvestPos = source.pos;
+        }
+      }
+
+      if (harvestPos) {
+        // 如果目标是 Source 本身（说明是要去 Range 1 的位置），且不在范围内
+        if (harvestPos.isEqualTo(source.pos)) {
+          if (creep.harvest(source) == ERR_NOT_IN_RANGE) {
+            moveModule.smartMove(creep, source, {
+              visualizePathStyle: { stroke: "#ffaa00" },
+            });
+          }
+        }
+        // 如果目标是具体坐标（Container）
+        else {
+          if (!creep.pos.isEqualTo(harvestPos)) {
+            moveModule.smartMove(creep, harvestPos, {
+              visualizePathStyle: { stroke: "#ffaa00" },
+            });
+          } else {
+            creep.harvest(source);
+          }
         }
       }
 
