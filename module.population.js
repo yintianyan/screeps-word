@@ -18,11 +18,11 @@ const populationModule = {
     });
 
     if (haulers.length > 0) {
-      // 有搬运工，Harvester 只需要负责挖，数量 = Source 数量 + 1 (冗余)
-      targets.harvester = sourceCount + 1;
+      // 有搬运工，Harvester 只需要负责挖
+      // 由于 Static Mining 会占据矿位，我们严格限制 1:1，避免拥堵
+      targets.harvester = sourceCount;
     } else {
       // 没搬运工，优先保证每个 Source 有一个 Harvester，然后立刻孵化 Hauler
-      // 之前是 sourceCount * 2，导致一直卡在孵化 Harvester，Hauler 出不来
       targets.harvester = sourceCount;
     }
 

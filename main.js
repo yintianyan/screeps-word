@@ -65,6 +65,23 @@ module.exports.loop = function () {
         return [CARRY, CARRY, MOVE]; // Cost: 150 (100容量)
       }
 
+      // Harvester 专用高产配置 (Static Mining)
+      if (role === "harvester") {
+        // RCL 3+ (800 energy): 5 WORK (100% 效率) + 1 CARRY + 2 MOVE = 650
+        if (capacity >= 650)
+          return [WORK, WORK, WORK, WORK, WORK, CARRY, MOVE, MOVE];
+
+        // RCL 2 (550 energy): 4 WORK (80% 效率) + 1 CARRY + 1 MOVE = 500
+        // 注意：只有 1 个 MOVE，移动慢，但到了位置就不动了
+        if (capacity >= 550) return [WORK, WORK, WORK, WORK, CARRY, MOVE];
+
+        // RCL 1-2 (300-500 energy): 2 WORK + 1 CARRY + 1 MOVE = 300
+        if (capacity >= 300) return [WORK, WORK, CARRY, MOVE];
+
+        return [WORK, CARRY, MOVE]; // Cost: 200
+      }
+
+      // 其他角色 (Upgrader, Builder)
       if (capacity >= 550)
         return [WORK, WORK, WORK, CARRY, CARRY, MOVE, MOVE, MOVE]; // Cost: 550
       if (capacity >= 400) return [WORK, WORK, CARRY, CARRY, MOVE, MOVE]; // Cost: 400
