@@ -1,3 +1,5 @@
+const moveModule = require("module.move");
+
 const roleHarvester = {
   /** @param {Creep} creep **/
   run: function (creep) {
@@ -26,7 +28,7 @@ const roleHarvester = {
         // 如果有 Container，就站在 Container 上挖
         if (container) {
           if (!creep.pos.isEqualTo(container.pos)) {
-            creep.moveTo(container, {
+            moveModule.smartMove(creep, container, {
               visualizePathStyle: { stroke: "#ffaa00" },
             });
           } else {
@@ -35,7 +37,9 @@ const roleHarvester = {
         } else {
           // 没有 Container，就正常走过去挖
           if (creep.harvest(source) == ERR_NOT_IN_RANGE) {
-            creep.moveTo(source, { visualizePathStyle: { stroke: "#ffaa00" } });
+            moveModule.smartMove(creep, source, {
+              visualizePathStyle: { stroke: "#ffaa00" },
+            });
           }
         }
       } else {
@@ -65,7 +69,7 @@ const roleHarvester = {
       });
       if (targets.length > 0) {
         if (creep.transfer(targets[0], RESOURCE_ENERGY) == ERR_NOT_IN_RANGE) {
-          creep.moveTo(targets[0], {
+          moveModule.smartMove(creep, targets[0], {
             visualizePathStyle: { stroke: "#ffffff" },
           });
         }
@@ -75,7 +79,7 @@ const roleHarvester = {
         if (
           creep.upgradeController(creep.room.controller) == ERR_NOT_IN_RANGE
         ) {
-          creep.moveTo(creep.room.controller, {
+          moveModule.smartMove(creep, creep.room.controller, {
             visualizePathStyle: { stroke: "#ffffff" },
           });
         }

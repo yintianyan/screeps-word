@@ -1,3 +1,5 @@
+const moveModule = require("module.move");
+
 const roleBuilder = {
   /** @param {Creep} creep **/
   run: function (creep) {
@@ -25,7 +27,7 @@ const roleBuilder = {
 
       if (repairTargets.length > 0) {
         if (creep.repair(repairTargets[0]) == ERR_NOT_IN_RANGE) {
-          creep.moveTo(repairTargets[0], {
+          moveModule.smartMove(creep, repairTargets[0], {
             visualizePathStyle: { stroke: "#ff0000" },
           });
         }
@@ -45,7 +47,7 @@ const roleBuilder = {
           criticalTargets.length > 0 ? criticalTargets[0] : targets[0];
 
         if (creep.build(target) == ERR_NOT_IN_RANGE) {
-          creep.moveTo(target, {
+          moveModule.smartMove(creep, target, {
             visualizePathStyle: { stroke: "#ffffff" },
           });
         }
@@ -54,7 +56,7 @@ const roleBuilder = {
         if (
           creep.upgradeController(creep.room.controller) == ERR_NOT_IN_RANGE
         ) {
-          creep.moveTo(creep.room.controller, {
+          moveModule.smartMove(creep, creep.room.controller, {
             visualizePathStyle: { stroke: "#ffffff" },
           });
         }
@@ -73,7 +75,9 @@ const roleBuilder = {
       const source = Game.getObjectById(creep.memory.sourceId);
       if (source) {
         if (creep.harvest(source) == ERR_NOT_IN_RANGE) {
-          creep.moveTo(source, { visualizePathStyle: { stroke: "#ffaa00" } });
+          moveModule.smartMove(creep, source, {
+            visualizePathStyle: { stroke: "#ffaa00" },
+          });
         }
       } else {
         delete creep.memory.sourceId;

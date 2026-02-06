@@ -1,3 +1,5 @@
+const moveModule = require("module.move");
+
 const roleUpgrader = {
   /** @param {Creep} creep **/
   run: function (creep) {
@@ -12,7 +14,7 @@ const roleUpgrader = {
 
     if (creep.memory.upgrading) {
       if (creep.upgradeController(creep.room.controller) == ERR_NOT_IN_RANGE) {
-        creep.moveTo(creep.room.controller, {
+        moveModule.smartMove(creep, creep.room.controller, {
           visualizePathStyle: { stroke: "#ffffff" },
         });
       }
@@ -30,7 +32,9 @@ const roleUpgrader = {
       const source = Game.getObjectById(creep.memory.sourceId);
       if (source) {
         if (creep.harvest(source) == ERR_NOT_IN_RANGE) {
-          creep.moveTo(source, { visualizePathStyle: { stroke: "#ffaa00" } });
+          moveModule.smartMove(creep, source, {
+            visualizePathStyle: { stroke: "#ffaa00" },
+          });
         }
       } else {
         delete creep.memory.sourceId;
