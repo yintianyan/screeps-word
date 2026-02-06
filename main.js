@@ -67,17 +67,24 @@ module.exports.loop = function () {
 
       // Harvester 专用高产配置 (Static Mining)
       if (role === "harvester") {
-        // RCL 3+ (800 energy): 5 WORK (100% 效率) + 1 CARRY + 2 MOVE = 650
-        if (capacity >= 650)
-          return [WORK, WORK, WORK, WORK, WORK, CARRY, MOVE, MOVE];
+        // 设计3：高级采矿Creep（专业分工）
 
-        // RCL 2 (550 energy): 4 WORK (80% 效率) + 1 CARRY + 1 MOVE = 500
-        // 注意：只有 1 个 MOVE，移动慢，但到了位置就不动了
-        if (capacity >= 550) return [WORK, WORK, WORK, WORK, CARRY, MOVE];
+        // Late Game (RCL 3+, Energy >= 750)
+        // 超高效采集：5 WORK (100% 满速) + 移动保障
+        if (capacity >= 750)
+          return [WORK, WORK, WORK, WORK, WORK, CARRY, CARRY, MOVE, MOVE, MOVE];
 
-        // RCL 1-2 (300-500 energy): 2 WORK + 1 CARRY + 1 MOVE = 300
+        // Mid Game (RCL 2, Energy >= 550)
+        // 采集+移动平衡：4 WORK (80% 速度) + 1 CARRY + 2 MOVE (移动较快)
+        // Cost: 400 + 50 + 100 = 550 (完美利用 RCL 2 上限)
+        if (capacity >= 550) return [WORK, WORK, WORK, WORK, CARRY, MOVE, MOVE];
+
+        // Early Game (RCL 1-2, Energy >= 300)
+        // 纯采集：2 WORK + 1 CARRY + 1 MOVE
+        // Cost: 200 + 50 + 50 = 300
         if (capacity >= 300) return [WORK, WORK, CARRY, MOVE];
 
+        // 最低配
         return [WORK, CARRY, MOVE]; // Cost: 200
       }
 
