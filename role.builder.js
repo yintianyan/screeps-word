@@ -23,7 +23,23 @@ const roleBuilder = {
       });
 
       // 按损坏程度排序，优先修最烂的
-      repairTargets.sort((a, b) => a.hits / a.hitsMax - b.hits / b.hitsMax);
+      // 关键修改：按照 "Container优先 > 损坏比例" 的规则排序
+      repairTargets.sort((a, b) => {
+        // 如果一个是 Container，另一个不是，Container 优先
+        if (
+          a.structureType === STRUCTURE_CONTAINER &&
+          b.structureType !== STRUCTURE_CONTAINER
+        )
+          return -1;
+        if (
+          a.structureType !== STRUCTURE_CONTAINER &&
+          b.structureType === STRUCTURE_CONTAINER
+        )
+          return 1;
+
+        // 否则按损坏比例排序
+        return a.hits / a.hitsMax - b.hits / b.hitsMax;
+      });
 
       if (repairTargets.length > 0) {
         if (creep.repair(repairTargets[0]) == ERR_NOT_IN_RANGE) {
