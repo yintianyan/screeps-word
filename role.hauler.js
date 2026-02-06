@@ -58,6 +58,32 @@ const roleHauler = {
           });
         }
       } else {
+        // 检查 Spawn 是否正在孵化，或者是否需要孵化（人口不足）
+        const spawn = creep.room.find(FIND_MY_SPAWNS)[0];
+        const populationModule = require('module.population');
+        const currentTargets = populationModule.calculateTargets(creep.room);
+        const currentCreeps = creep.room.find(FIND_MY_CREEPS);
+        
+        let needsSpawning = false;
+        if (spawn && spawn.spawning) {
+            needsSpawning = true;
+        } else {
+            // 简单估算：如果现有 Creep 总数 < 目标总数，说明可能需要孵化
+            // 这里只做一个粗略检查，避免依赖 main.js 的 counts 变量
+            const totalTarget = Object.values(currentTargets).reduce((a, b) => a + b, 0);
+            if (currentCreeps.length < totalTarget) {
+                needsSpawning = true;
+            }
+        }
+
+        if (needsSpawning && spawn) {
+            // 如果需要孵化，就在 Spawn 附近待命 (距离 3 格，避免堵路)
+            if (!creep.pos.inRangeTo(spawn, 3)) {
+                moveModule.smartMove(creep, spawn, {range: 3, visualizePathStyle: {stroke: '#00ffff'}});
+            }
+            return; // 待命，不做其他事
+        }
+
         // 如果所有地方都满了，可以选择去升级控制器，或者在 Spawn 附近待命
         if (
           creep.upgradeController(creep.room.controller) == ERR_NOT_IN_RANGE
