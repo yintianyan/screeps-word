@@ -39,16 +39,20 @@ const roleBuilder = {
       if (targets.length) {
         // 优先建造 Container (关键！确保矿区和Controller附近的Container被优先建造)
         // 其次 Extension
-        const containers = targets.filter(s => s.structureType === STRUCTURE_CONTAINER);
-        const extensions = targets.filter(s => s.structureType === STRUCTURE_EXTENSION);
-        
+        const containers = targets.filter(
+          (s) => s.structureType === STRUCTURE_CONTAINER,
+        );
+        const extensions = targets.filter(
+          (s) => s.structureType === STRUCTURE_EXTENSION,
+        );
+
         let target = null;
         if (containers.length > 0) {
-            target = creep.pos.findClosestByPath(containers);
+          target = creep.pos.findClosestByPath(containers);
         } else if (extensions.length > 0) {
-            target = creep.pos.findClosestByPath(extensions);
+          target = creep.pos.findClosestByPath(extensions);
         } else {
-            target = targets[0]; // 其他建筑 (Road, Tower, etc.)
+          target = targets[0]; // 其他建筑 (Road, Tower, etc.)
         }
 
         if (creep.build(target) == ERR_NOT_IN_RANGE) {
@@ -106,6 +110,30 @@ const roleBuilder = {
           });
         }
         return;
+      }
+
+      // 3.1 紧急取能：如果 Container 很少（基建初期），允许从 Spawn/Extension 取能量
+      // 避免死锁：没有 Container -> Builder 没能量 -> 建不了 Container
+      const builtContainers = creep.room.find(FIND_STRUCTURES, {
+        filter: (s) => s.structureType === STRUCTURE_CONTAINER,
+      });
+      if (builtContainers.length < 2) {
+        const spawnEnergy = creep.pos.findClosestByPath(FIND_STRUCTURES, {
+          filter: (s) =>
+            (s.structureType === STRUCTURE_SPAWN ||
+              s.structureType === STRUCTURE_EXTENSION) &&
+            s.store[RESOURCE_ENERGY] > 50,
+        });
+        if (spawnEnergy) {
+          if (
+            creep.withdraw(spawnEnergy, RESOURCE_ENERGY) == ERR_NOT_IN_RANGE
+          ) {
+            moveModule.smartMove(creep, spawnEnergy, {
+              visualizePathStyle: { stroke: "#ffaa00" },
+            });
+          }
+          return;
+        }
       }
 
       // 4. 只有在没有任何 Harvester 的紧急情况下，才允许自己去挖矿

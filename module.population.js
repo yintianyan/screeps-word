@@ -54,23 +54,36 @@ const populationModule = {
     // 3. Builder:
     // 取决于是否有工地
     const sites = room.find(FIND_CONSTRUCTION_SITES);
+    const containerSites = sites.filter(
+      (s) => s.structureType === STRUCTURE_CONTAINER,
+    );
+
     if (sites.length > 0) {
-      // 工地越多，Builder 越多，上限 3
-      targets.builder = Math.min(3, 1 + Math.floor(sites.length / 5));
+      if (containerSites.length > 0) {
+        // 紧急基建模式：有 Container 要造，提高 Builder 数量
+        targets.builder = 3;
+      } else {
+        // 普通建造模式
+        targets.builder = Math.min(3, 1 + Math.floor(sites.length / 5));
+      }
     } else {
       targets.builder = 0;
     }
 
     // 4. Upgrader:
-    // 只要有闲置能量就升级
-    // 如果能量很充足 (>80% Capacity)，多来点 Upgrader
-    const energyRatio = room.energyAvailable / room.energyCapacityAvailable;
-    if (energyRatio > 0.8) {
-      targets.upgrader = 3;
-    } else if (energyRatio > 0.3) {
-      targets.upgrader = 2;
+    // 如果有 Container 正在建造，减少 Upgrader 以节省能量和 Spawn 队列
+    if (containerSites.length > 0) {
+      targets.upgrader = 1;
     } else {
-      targets.upgrader = 1; // 至少保持 1 个升级防止掉级
+      // 正常模式：根据能量富裕程度调整
+      const energyRatio = room.energyAvailable / room.energyCapacityAvailable;
+      if (energyRatio > 0.8) {
+        targets.upgrader = 3;
+      } else if (energyRatio > 0.3) {
+        targets.upgrader = 2;
+      } else {
+        targets.upgrader = 1; // 至少保持 1 个升级防止掉级
+      }
     }
 
     return targets;
