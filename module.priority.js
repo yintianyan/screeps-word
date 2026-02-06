@@ -68,13 +68,21 @@ const priorityModule = {
 
         if (bestSites.length === 0) return null;
 
-        // 2. 同一优先级下，如果有 creepPos，找最近的
+        // 2. 在同优先级下，优先 "集中火力"
+        // 如果有已经开工的 (progress > 0)，优先修进度最快的，忽略距离
+        // 这样可以避免大家雨露均沾，而是合力先修完一个
+        const inProgress = bestSites.filter(s => s.progress > 0);
+        if (inProgress.length > 0) {
+            inProgress.sort((a, b) => (b.progress / b.progressTotal) - (a.progress / a.progressTotal));
+            return inProgress[0];
+        }
+
+        // 3. 如果都没开工，再找最近的，避免舍近求远
         if (creepPos) {
             return creepPos.findClosestByPath(bestSites);
         }
 
-        // 3. 否则找进度最快的
-        bestSites.sort((a, b) => (b.progress / b.progressTotal) - (a.progress / a.progressTotal));
+        // 4. 如果没有位置信息，随便返回一个 (或者按 id 排序保证确定性)
         return bestSites[0];
     }
 };
