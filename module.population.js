@@ -28,7 +28,7 @@ const populationModule = {
 
     // 2. Hauler:
     // 根据 Harvester 数量和掉落的能量来定
-    // 每 2 个 Harvester 配 1 个 Hauler，或者如果有大量掉落能量，增加 Hauler
+    // 采用 1:1 配比，确保每个矿点都有专人运输，避免单 Hauler 忙不过来
     const droppedEnergy = room.find(FIND_DROPPED_RESOURCES, {
       filter: (r) => r.resourceType === RESOURCE_ENERGY,
     });
@@ -37,12 +37,15 @@ const populationModule = {
       0,
     );
 
-    // 基础 Hauler
-    targets.hauler = Math.floor(targets.harvester / 2);
-    // 如果掉落能量很多 (>1000)，增加 Hauler
+    // 基础 Hauler：和 Harvester 数量一致（或者至少等于 Source 数量）
+    // 考虑到 Harvester 可能会有冗余（Source+1），Hauler 保持一致比较安全
+    targets.hauler = targets.harvester;
+
+    // 如果掉落能量很多 (>1000)，额外增加 Hauler 抢救
     if (totalDropped > 1000) {
-      targets.hauler += 2;
+      targets.hauler += 1;
     }
+
     // 至少 1 个 Hauler (如果已有 Harvester)
     if (targets.harvester > 0 && targets.hauler < 1) {
       targets.hauler = 1;
