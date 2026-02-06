@@ -76,6 +76,21 @@ const roleHarvester = {
              if (nearbyHauler) {
                  creep.transfer(nearbyHauler, RESOURCE_ENERGY);
              }
+
+             // === 智能建造逻辑 (Intelligent Building) ===
+             // 只有当有能量且不需要立刻给Hauler时才考虑
+             // 1. 检查是否需要自我维护 (Container Under Feet)
+             if (container && container.hits < container.hitsMax * 0.8) {
+                 creep.repair(container);
+             }
+             // 2. 检查是否有附近的工地 (Range 3)
+             // 适用于：早期修路、重建Container、紧急维修
+             else {
+                 const nearbySites = creep.pos.findInRange(FIND_CONSTRUCTION_SITES, 3);
+                 if (nearbySites.length > 0) {
+                     creep.build(nearbySites[0]);
+                 }
+             }
         }
         
     } else {
@@ -88,6 +103,17 @@ const roleHarvester = {
             }
         } else {
             // 满了，去送货
+            // === 智能决策：送货还是建造？ ===
+            
+            // 条件1: 早期游戏 (RCL <= 3) 且 Spawn 满了
+            // 条件2: 没有专业 Builder
+            // 条件3: 工地数量很少 (Harvester 顺手就能做)
+            
+            const rcl = creep.room.controller.level;
+            const builders = creep.room.find(FIND_MY_CREEPS, {filter: c => c.memory.role === 'builder'});
+            const sites = creep.room.find(FIND_CONSTRUCTION_SITES);
+            
+            // 优先填充 Spawn/Extension
             const targets = creep.room.find(FIND_STRUCTURES, {
                 filter: (structure) => {
                     return (
@@ -103,7 +129,24 @@ const roleHarvester = {
                     moveModule.smartMove(creep, targets[0], { visualizePathStyle: { stroke: "#ffffff" } });
                 }
             } else {
-                // 如果都满了
+                // Spawn 满了，考虑去建造
+                let shouldBuild = false;
+                
+                if (sites.length > 0) {
+                    if (rcl <= 3) shouldBuild = true; // 早期全员基建
+                    if (builders.length === 0) shouldBuild = true; // 没 Builder，只能我来
+                    if (sites.length <= 3) shouldBuild = true; // 工地少，顺手做了
+                }
+                
+                if (shouldBuild) {
+                    const target = creep.pos.findClosestByPath(sites);
+                    if (creep.build(target) == ERR_NOT_IN_RANGE) {
+                        moveModule.smartMove(creep, target, { visualizePathStyle: { stroke: "#ffffff" } });
+                    }
+                    return;
+                }
+
+                // 如果不建造，再考虑其他
                 // 1. 检查是否需要孵化 (Wait near Spawn)
                 const spawn = creep.room.find(FIND_MY_SPAWNS)[0];
                 const populationModule = require("module.population");
