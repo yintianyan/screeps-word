@@ -6,6 +6,7 @@ const autoBuilder = require("module.autoBuilder");
 const populationModule = require("module.population");
 const towerModule = require("module.tower");
 const monitorModule = require("module.monitor");
+const structurePlanner = require("module.structurePlanner");
 
 module.exports.loop = function () {
   // 1. 清理内存：删除死亡 Creep 的内存
@@ -18,7 +19,12 @@ module.exports.loop = function () {
 
   // 运行自动建设模块和监控模块
   if (Game.spawns["Spawn1"]) {
+    // 运行新的智能结构规划器
+    structurePlanner.run(Game.spawns["Spawn1"].room);
+
+    // 运行旧的 autoBuilder (主要用于 Roads/Extensions，Container 逻辑已由 Planner 接管)
     autoBuilder.run(Game.spawns["Spawn1"].room);
+
     towerModule.run(Game.spawns["Spawn1"].room);
     monitorModule.run(Game.spawns["Spawn1"].room);
   }
