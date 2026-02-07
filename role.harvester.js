@@ -100,22 +100,33 @@ const roleHarvester = {
             });
           } else {
             // === 到了位置，开始干活 ===
-            
+
             // 1. 优先把能量存入附近的 Container (如果满了且有 Container)
             // 这解决了 "采集后并没有将资源存放在 container" 的问题
             if (creep.store.getFreeCapacity() === 0) {
-                // 找 Range 1 内的 Container (不管是脚下的还是旁边的)
-                const nearbyContainer = creep.pos.findInRange(FIND_STRUCTURES, 1, {
-                    filter: s => s.structureType === STRUCTURE_CONTAINER && s.store.getFreeCapacity(RESOURCE_ENERGY) > 0
-                })[0];
-                
-                if (nearbyContainer) {
-                    creep.transfer(nearbyContainer, RESOURCE_ENERGY);
-                    return; // 这一 tick 做了 transfer，就不能 harvest 了
-                }
+              // 找 Range 1 内的 Container (不管是脚下的还是旁边的)
+              const nearbyContainer = creep.pos.findInRange(
+                FIND_STRUCTURES,
+                1,
+                {
+                  filter: (s) =>
+                    s.structureType === STRUCTURE_CONTAINER &&
+                    s.store.getFreeCapacity(RESOURCE_ENERGY) > 0,
+                },
+              )[0];
+
+              if (nearbyContainer) {
+                creep.transfer(nearbyContainer, RESOURCE_ENERGY);
+                creep.say("📦 store");
+                return; // 这一 tick 做了 transfer，就不能 harvest 了
+              }
             }
 
             // 2. 否则继续挖矿
+            // 如果背包满了还在挖，说明是 Drop Mining
+            if (creep.store.getFreeCapacity() === 0) {
+              creep.say("⬇️ drop");
+            }
             creep.harvest(source);
           }
         }
@@ -137,6 +148,7 @@ const roleHarvester = {
         // 1. 检查是否需要自我维护 (Container Under Feet)
         if (container && container.hits < container.hitsMax * 0.8) {
           creep.repair(container);
+          creep.say("🔧 fix");
         }
         // 2. 检查是否有附近的工地 (Range 3)
         // 适用于：早期修路、重建Container、紧急维修
@@ -147,6 +159,7 @@ const roleHarvester = {
             const target = priorityModule.getBestTarget(nearbySites, creep.pos);
             if (target) {
               creep.build(target);
+              creep.say("🚧 build");
             }
           }
         }
