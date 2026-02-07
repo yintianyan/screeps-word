@@ -5,6 +5,7 @@ const roleHauler = require("role.hauler");
 const autoBuilder = require("module.autoBuilder");
 const populationModule = require("module.population");
 const towerModule = require("module.tower");
+const monitorModule = require("module.monitor");
 
 module.exports.loop = function () {
   // 1. 清理内存：删除死亡 Creep 的内存
@@ -15,10 +16,11 @@ module.exports.loop = function () {
     }
   }
 
-  // 运行自动建设模块
+  // 运行自动建设模块和监控模块
   if (Game.spawns["Spawn1"]) {
     autoBuilder.run(Game.spawns["Spawn1"].room);
     towerModule.run(Game.spawns["Spawn1"].room);
+    monitorModule.run(Game.spawns["Spawn1"].room);
   }
 
   // 2. 孵化逻辑
@@ -59,41 +61,53 @@ module.exports.loop = function () {
   if (spawn && !spawn.spawning) {
     // 动态计算身体部件
     const getBody = (capacity, role) => {
-      // 搬运工只需要 CARRY 和 MOVE
+      // 1. 搬运工 (Hauler): 唯一需要频繁移动的角色
+      // 配置: CARRY + MOVE (1:1)
       if (role === "hauler") {
-        if (capacity >= 300) return [CARRY, CARRY, CARRY, CARRY, MOVE, MOVE]; // Cost: 300 (200容量)
+        if (capacity >= 300) return [CARRY, CARRY, CARRY, CARRY, MOVE, MOVE]; // Cost: 300 (200容量) - 这里的配比是 2:1，移动稍慢，但容量大
         return [CARRY, CARRY, MOVE]; // Cost: 150 (100容量)
       }
 
-      // Harvester 专用高产配置 (Static Mining)
+      // 2. 采集者 (Harvester): 固定不动 (Stationary)
+      // 配置: Max WORK + Min CARRY + Min MOVE
       if (role === "harvester") {
-        // 设计3：高级采矿Creep（专业分工）
-
         // Late Game (RCL 3+, Energy >= 750)
-        // 超高效采集：5 WORK (100% 满速) + 移动保障
+        // 5 WORK (100% 满速) + 2 CARRY (100容量) + 3 MOVE (足以移动到 Source)
+        // Cost: 500 + 100 + 150 = 750
         if (capacity >= 750)
           return [WORK, WORK, WORK, WORK, WORK, CARRY, CARRY, MOVE, MOVE, MOVE];
 
         // Mid Game (RCL 2, Energy >= 550)
-        // 采集+移动平衡：4 WORK (80% 速度) + 1 CARRY + 2 MOVE (移动较快)
-        // Cost: 400 + 50 + 100 = 550 (完美利用 RCL 2 上限)
+        // 4 WORK + 1 CARRY + 2 MOVE
+        // Cost: 400 + 50 + 100 = 550
         if (capacity >= 550) return [WORK, WORK, WORK, WORK, CARRY, MOVE, MOVE];
 
-        // Early Game (RCL 1-2, Energy >= 300)
-        // 纯采集：2 WORK + 1 CARRY + 1 MOVE
-        // Cost: 200 + 50 + 50 = 300
+        // Early Game
         if (capacity >= 300) return [WORK, WORK, CARRY, MOVE];
-
-        // 最低配
-        return [WORK, CARRY, MOVE]; // Cost: 200
+        return [WORK, CARRY, MOVE];
       }
 
-      // 其他角色 (Upgrader, Builder)
-      if (capacity >= 550)
-        return [WORK, WORK, WORK, CARRY, CARRY, MOVE, MOVE, MOVE]; // Cost: 550
-      if (capacity >= 400) return [WORK, WORK, CARRY, CARRY, MOVE, MOVE]; // Cost: 400
-      if (capacity >= 300) return [WORK, WORK, CARRY, MOVE]; // Cost: 300
-      return [WORK, CARRY, MOVE]; // Cost: 200
+      // 3. 升级者 (Upgrader): 固定不动 (Stationary)
+      // 配置: Max WORK + Min CARRY + Min MOVE (只需要走到 Controller)
+      if (role === "upgrader") {
+        // Upgrader 不需要太多 CARRY，因为 Hauler 会源源不断送货
+        // 重点是 WORK 的吞吐量
+        if (capacity >= 550) return [WORK, WORK, WORK, WORK, CARRY, MOVE, MOVE]; // Cost: 550 (4 WORK!)
+        if (capacity >= 300) return [WORK, WORK, CARRY, MOVE];
+        return [WORK, CARRY, MOVE];
+      }
+
+      // 4. 建造者 (Builder): 区域移动 (Semi-Stationary)
+      // 配置: Balanced WORK/CARRY + MOVE
+      if (role === "builder") {
+        if (capacity >= 550)
+          return [WORK, WORK, CARRY, CARRY, CARRY, MOVE, MOVE, MOVE]; // Cost: 550
+        if (capacity >= 300) return [WORK, CARRY, CARRY, MOVE, MOVE]; // Cost: 300
+        return [WORK, CARRY, MOVE];
+      }
+
+      // Fallback
+      return [WORK, CARRY, MOVE];
     };
 
     // 如果 Harvester 数量为 0，必须使用当前可用能量（energyAvailable）进行紧急孵化

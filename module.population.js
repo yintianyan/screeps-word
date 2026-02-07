@@ -1,4 +1,19 @@
 const populationModule = {
+  // === 配置区域 (Config) ===
+  config: {
+    // 角色基础配比
+    ratios: {
+      harvesterPerSource: 1, // 每个 Source 1 个 Harvester (已在 main.js 中强制绑定)
+      haulerBaseCount: 1, // 基础 Hauler 数量 (冗余)
+    },
+    // 角色上限 (防止无限繁殖)
+    limits: {
+      builder: 3,
+      upgrader: 3,
+      hauler: 6,
+    },
+  },
+
   /** @param {Room} room **/
   calculateTargets: function (room) {
     const targets = {
@@ -40,12 +55,15 @@ const populationModule = {
     // 基础 Hauler：现在 Harvester 翻倍了，但产出没变，所以 Hauler 不需要翻倍
     // 保持每个 Source 至少有 1 个 Hauler，如果路途遥远或者产出快，可以适当增加
     // 这里设定为 Source 数量 + 1 (冗余)
-    targets.hauler = sourceCount + 1;
+    targets.hauler = sourceCount + this.config.ratios.haulerBaseCount;
 
     // 如果掉落能量很多 (>1000)，额外增加 Hauler 抢救
     if (totalDropped > 1000) {
       targets.hauler += 1;
     }
+
+    // 限制 Hauler 上限
+    targets.hauler = Math.min(targets.hauler, this.config.limits.hauler);
 
     // 至少 1 个 Hauler (如果已有 Harvester)
     if (targets.harvester > 0 && targets.hauler < 1) {
@@ -62,10 +80,13 @@ const populationModule = {
     if (sites.length > 0) {
       if (containerSites.length > 0) {
         // 紧急基建模式：有 Container 要造，提高 Builder 数量
-        targets.builder = 3;
+        targets.builder = this.config.limits.builder;
       } else {
         // 普通建造模式
-        targets.builder = Math.min(3, 1 + Math.floor(sites.length / 5));
+        targets.builder = Math.min(
+          this.config.limits.builder,
+          1 + Math.floor(sites.length / 5),
+        );
       }
     } else {
       targets.builder = 0;
@@ -75,7 +96,7 @@ const populationModule = {
     // 紧急状态检查：如果控制器即将降级 (< 4000 ticks)，强制提升 Upgrader 优先级
     if (room.controller && room.controller.ticksToDowngrade < 4000) {
       console.log("🚨 紧急警报：控制器即将降级！进入救援模式！");
-      targets.upgrader = 3;
+      targets.upgrader = this.config.limits.upgrader;
       targets.builder = 0; // 暂停基建，全力救火
     }
     // 如果有 Container 正在建造，减少 Upgrader 以节省能量和 Spawn 队列
@@ -85,7 +106,7 @@ const populationModule = {
       // 正常模式：根据能量富裕程度调整
       const energyRatio = room.energyAvailable / room.energyCapacityAvailable;
       if (energyRatio > 0.8) {
-        targets.upgrader = 3;
+        targets.upgrader = this.config.limits.upgrader;
       } else if (energyRatio > 0.3) {
         targets.upgrader = 2;
       } else {

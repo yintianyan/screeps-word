@@ -73,8 +73,16 @@ const roleBuilder = {
         }
       }
     } else {
-      // 1. 优先从 Storage 取能量
-      if (creep.room.storage && creep.room.storage.store[RESOURCE_ENERGY] > 0) {
+      // === 严格的定点/区域工作模式 ===
+      // Builder 应该优先从工地附近的 Container/Storage 取货
+      // 如果没有，就原地等待 Hauler 喂养 (通过 say "wait")
+
+      // 1. 优先从 Storage 取能量 (如果距离合适)
+      if (
+        creep.room.storage &&
+        creep.room.storage.store[RESOURCE_ENERGY] > 0 &&
+        creep.pos.inRangeTo(creep.room.storage, 5)
+      ) {
         if (
           creep.withdraw(creep.room.storage, RESOURCE_ENERGY) ==
           ERR_NOT_IN_RANGE
@@ -86,25 +94,30 @@ const roleBuilder = {
         return;
       }
 
-      // 2. 其次从任意有能量的 Container 取能量
-      const container = creep.pos.findClosestByPath(FIND_STRUCTURES, {
+      // 2. 其次从 *附近* (Range 3) 的 Container 取能量
+      // 不再跑遍全图找 Container
+      const nearbyContainer = creep.pos.findInRange(FIND_STRUCTURES, 3, {
         filter: (s) =>
           s.structureType === STRUCTURE_CONTAINER &&
           s.store[RESOURCE_ENERGY] > 0,
-      });
-      if (container) {
-        if (creep.withdraw(container, RESOURCE_ENERGY) == ERR_NOT_IN_RANGE) {
-          moveModule.smartMove(creep, container, {
+      })[0];
+
+      if (nearbyContainer) {
+        if (
+          creep.withdraw(nearbyContainer, RESOURCE_ENERGY) == ERR_NOT_IN_RANGE
+        ) {
+          moveModule.smartMove(creep, nearbyContainer, {
             visualizePathStyle: { stroke: "#ffaa00" },
           });
         }
         return;
       }
 
-      // 3. 捡地上的能量
-      const dropped = creep.pos.findClosestByPath(FIND_DROPPED_RESOURCES, {
+      // 3. 捡 *附近* (Range 3) 地上的能量
+      const dropped = creep.pos.findInRange(FIND_DROPPED_RESOURCES, 3, {
         filter: (r) => r.resourceType === RESOURCE_ENERGY,
-      });
+      })[0];
+
       if (dropped) {
         if (creep.pickup(dropped) == ERR_NOT_IN_RANGE) {
           moveModule.smartMove(creep, dropped, {
@@ -114,58 +127,10 @@ const roleBuilder = {
         return;
       }
 
-      // 3.1 紧急取能：如果 Container 很少（基建初期），允许从 Spawn/Extension 取能量
-      // 避免死锁：没有 Container -> Builder 没能量 -> 建不了 Container
-      const builtContainers = creep.room.find(FIND_STRUCTURES, {
-        filter: (s) => s.structureType === STRUCTURE_CONTAINER,
-      });
-      if (builtContainers.length < 2) {
-        const spawnEnergy = creep.pos.findClosestByPath(FIND_STRUCTURES, {
-          filter: (s) =>
-            (s.structureType === STRUCTURE_SPAWN ||
-              s.structureType === STRUCTURE_EXTENSION) &&
-            s.store[RESOURCE_ENERGY] > 50,
-        });
-        if (spawnEnergy) {
-          if (
-            creep.withdraw(spawnEnergy, RESOURCE_ENERGY) == ERR_NOT_IN_RANGE
-          ) {
-            moveModule.smartMove(creep, spawnEnergy, {
-              visualizePathStyle: { stroke: "#ffaa00" },
-            });
-          }
-          return;
-        }
-      }
-
-      // 4. 只有在没有任何 Harvester 的紧急情况下，才允许自己去挖矿
-      const harvesters = creep.room.find(FIND_MY_CREEPS, {
-        filter: (c) => c.memory.role === "harvester",
-      });
-      if (harvesters.length === 0) {
-        if (!creep.memory.sourceId) {
-          const sources = creep.room.find(FIND_SOURCES);
-          if (sources.length > 0) {
-            const hash = creep.name
-              .split("")
-              .reduce((sum, char) => sum + char.charCodeAt(0), 0);
-            const source = sources[hash % sources.length];
-            creep.memory.sourceId = source.id;
-          }
-        }
-        const source = Game.getObjectById(creep.memory.sourceId);
-        if (source) {
-          if (creep.harvest(source) == ERR_NOT_IN_RANGE) {
-            moveModule.smartMove(creep, source, {
-              visualizePathStyle: { stroke: "#ffaa00" },
-            });
-          }
-        } else {
-          delete creep.memory.sourceId;
-        }
-      } else {
-        // 待命
-      }
+      // 4. 如果都找不到，请求喂养
+      creep.say("🙏 wait");
+      // 可以在这里寻找最近的 Construction Site 靠近，以免离得太远
+      // ...
     }
   },
 };

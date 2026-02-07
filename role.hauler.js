@@ -47,6 +47,52 @@ const roleHauler = {
         });
       }
 
+      // 2.5 关键逻辑：主动喂养正在等待的 Upgrader 和 Builder (Energy Sharing)
+      // 这实现了 "Carrier 负责在所有角色之间运输能量" 的需求
+      if (targets.length === 0) {
+        const hungryCreeps = creep.room.find(FIND_MY_CREEPS, {
+          filter: (c) => {
+            // 1. 角色是 Upgrader 或 Builder
+            // 2. 能量是空的 (或者很少)
+            // 3. 不在移动中 (简单的判断方法是看 store 是否为空，因为它们现在的逻辑是空了就 wait)
+            // 4. 距离不要太远 (比如 > 10 格就不去了，让它们自己想办法？不，必须送)
+            return (
+              (c.memory.role === "upgrader" || c.memory.role === "builder") &&
+              c.store[RESOURCE_ENERGY] < c.store.getCapacity() * 0.2
+            ); // 低于 20%
+          },
+        });
+
+        if (hungryCreeps.length > 0) {
+          // 优先喂 Upgrader (防止降级)
+          const hungryUpgraders = hungryCreeps.filter(
+            (c) => c.memory.role === "upgrader",
+          );
+          if (hungryUpgraders.length > 0) {
+            const target = creep.pos.findClosestByPath(hungryUpgraders);
+            if (target) {
+              if (creep.transfer(target, RESOURCE_ENERGY) == ERR_NOT_IN_RANGE) {
+                moveModule.smartMove(creep, target, {
+                  visualizePathStyle: { stroke: "#00ff00" },
+                });
+              }
+              return;
+            }
+          }
+
+          // 其次喂 Builder
+          const target = creep.pos.findClosestByPath(hungryCreeps);
+          if (target) {
+            if (creep.transfer(target, RESOURCE_ENERGY) == ERR_NOT_IN_RANGE) {
+              moveModule.smartMove(creep, target, {
+                visualizePathStyle: { stroke: "#00ff00" },
+              });
+            }
+            return;
+          }
+        }
+      }
+
       // 3. 填充 Spawn Container (General Container)
       // 这是给 Builder/Upgrader 用的缓存，也是 Spawn 的后备能源
       if (targets.length === 0) {
