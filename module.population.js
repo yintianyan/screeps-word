@@ -19,8 +19,8 @@ const populationModule = {
 
     if (haulers.length > 0) {
       // 有搬运工，Harvester 只需要负责挖
-      // 用户要求每个 Source 2 人
-      targets.harvester = sourceCount * 2;
+      // 用户要求改回每个 Source 1 人
+      targets.harvester = sourceCount;
     } else {
       // 没搬运工，优先保证每个 Source 有一个 Harvester，然后立刻孵化 Hauler
       targets.harvester = sourceCount;

@@ -100,59 +100,87 @@ const roleHarvester = {
             });
           } else {
             // === 到了位置，开始干活 (动作互斥：一 tick 只做一件事) ===
-            
+
             // 1. 优先把能量存入附近的 Container (如果满了且有 Container)
             if (creep.store.getFreeCapacity() === 0) {
-                // 找 Range 1 内的 Container (不管是脚下的还是旁边的)
-                const nearbyContainer = creep.pos.findInRange(FIND_STRUCTURES, 1, {
-                    filter: s => s.structureType === STRUCTURE_CONTAINER && s.store.getFreeCapacity(RESOURCE_ENERGY) > 0
+              // 优化查找逻辑：
+              // 1. 先看之前找到的 container 变量（通常是脚下的或者最近的）
+              let targetContainer = container;
+
+              // 2. 如果那个 container 不可用（满了或不在范围内），再搜一下周围
+              if (
+                !targetContainer ||
+                !creep.pos.inRangeTo(targetContainer, 1) ||
+                targetContainer.store.getFreeCapacity(RESOURCE_ENERGY) === 0
+              ) {
+                targetContainer = creep.pos.findInRange(FIND_STRUCTURES, 1, {
+                  filter: (s) =>
+                    s.structureType === STRUCTURE_CONTAINER &&
+                    s.store.getFreeCapacity(RESOURCE_ENERGY) > 0,
                 })[0];
-                
-                if (nearbyContainer) {
-                    creep.transfer(nearbyContainer, RESOURCE_ENERGY);
-                    creep.say("📦 store");
-                    return; // 存货完成，结束本 tick
+              }
+
+              if (targetContainer) {
+                // 只有当 Container 真的没满时才存
+                if (
+                  targetContainer.store.getFreeCapacity(RESOURCE_ENERGY) > 0
+                ) {
+                  creep.transfer(targetContainer, RESOURCE_ENERGY);
+                  creep.say("📦 store");
+                  return; // 存货完成，结束本 tick
                 }
+              }
             }
 
             // 2. 顺手把能量给身边的 Hauler (如果正好贴着，且自己快满了)
             if (creep.store.getFreeCapacity() < 10) {
-                const nearbyHauler = creep.pos.findInRange(FIND_MY_CREEPS, 1, {
-                    filter: (c) => c.memory.role === "hauler" && c.store.getFreeCapacity() > 0,
-                })[0];
-                if (nearbyHauler) {
-                    creep.transfer(nearbyHauler, RESOURCE_ENERGY);
-                    return; // 给货完成，结束本 tick
-                }
+              const nearbyHauler = creep.pos.findInRange(FIND_MY_CREEPS, 1, {
+                filter: (c) =>
+                  c.memory.role === "hauler" && c.store.getFreeCapacity() > 0,
+              })[0];
+              if (nearbyHauler) {
+                creep.transfer(nearbyHauler, RESOURCE_ENERGY);
+                return; // 给货完成，结束本 tick
+              }
             }
 
             // 3. 检查是否需要自我维护 (Container Under Feet)
             // 只有当有能量时才修
-            if (container && container.hits < container.hitsMax * 0.8 && creep.store[RESOURCE_ENERGY] > 0) {
-                creep.repair(container);
-                creep.say("🔧 fix");
-                return; // 维修完成，结束本 tick
+            if (
+              container &&
+              container.hits < container.hitsMax * 0.8 &&
+              creep.store[RESOURCE_ENERGY] > 0
+            ) {
+              creep.repair(container);
+              creep.say("🔧 fix");
+              return; // 维修完成，结束本 tick
             }
 
             // 4. 检查是否需要建造 (仅当背包满了，或者周围有非常紧急的工地)
             // 这里我们设定为：只有背包满了，作为 Drop Mining 的替代方案，才去建造
             // 这样既利用了溢出能量，又不会在背包不满时影响挖矿效率
             if (creep.store.getFreeCapacity() === 0) {
-                const nearbySites = creep.pos.findInRange(FIND_CONSTRUCTION_SITES, 3);
-                if (nearbySites.length > 0) {
-                    const target = priorityModule.getBestTarget(nearbySites, creep.pos);
-                    if (target) {
-                        creep.build(target);
-                        creep.say("🚧 build");
-                        return; // 建造完成，结束本 tick
-                    }
+              const nearbySites = creep.pos.findInRange(
+                FIND_CONSTRUCTION_SITES,
+                3,
+              );
+              if (nearbySites.length > 0) {
+                const target = priorityModule.getBestTarget(
+                  nearbySites,
+                  creep.pos,
+                );
+                if (target) {
+                  creep.build(target);
+                  creep.say("🚧 build");
+                  return; // 建造完成，结束本 tick
                 }
+              }
             }
 
             // 5. 最后：挖矿
             // 如果背包满了，且没存掉、没给 Hauler、没修、没建，那就只能 Drop Mining 了
             if (creep.store.getFreeCapacity() === 0) {
-                creep.say("⬇️ drop");
+              creep.say("⬇️ drop");
             }
             creep.harvest(source);
           }
