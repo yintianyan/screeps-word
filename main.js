@@ -143,13 +143,6 @@ module.exports.loop = function () {
       return [WORK, CARRY, MOVE];
     };
 
-    // 如果 Harvester 数量为 0，必须使用当前可用能量（energyAvailable）进行紧急孵化
-    // 否则使用最大容量（energyCapacityAvailable）等待 Extensions 填满
-    const energyToUse =
-      counts.harvester === 0
-        ? spawn.room.energyAvailable
-        : spawn.room.energyCapacityAvailable;
-
     // === Harvester 孵化逻辑优化：按 Source 分配 ===
     // 找出哪个 Source 缺人
     const sources = spawn.room.find(FIND_SOURCES);
@@ -158,6 +151,7 @@ module.exports.loop = function () {
     });
 
     let targetSource = null;
+    let hasEmptySource = false; // 是否有完全没人的 Source
 
     // 统计每个 Source 的 Harvester 数量
     // 过滤掉即将死亡的 (ticksToLive < 100)，除非它是刚刚孵化出来的
@@ -171,6 +165,14 @@ module.exports.loop = function () {
       }
     });
 
+    // 检查是否有 Source 是 0 人
+    for (const source of sources) {
+      if (sourceHarvesterCounts[source.id] === 0) {
+        hasEmptySource = true;
+        break;
+      }
+    }
+
     // 找到第一个缺人的 Source (目前设定为每个 Source 2 人)
     for (const source of sources) {
       if (sourceHarvesterCounts[source.id] < 2) {
@@ -178,6 +180,13 @@ module.exports.loop = function () {
         break;
       }
     }
+
+    // 如果有 Source 完全没人 (0 Harvester)，或者全局 Harvester 为 0，必须使用当前可用能量进行紧急孵化
+    // 否则使用最大容量等待 Extensions 填满
+    const energyToUse =
+      counts.harvester === 0 || hasEmptySource
+        ? spawn.room.energyAvailable
+        : spawn.room.energyCapacityAvailable;
 
     if (targetSource) {
       const newBody = getBody(energyToUse, "harvester");
