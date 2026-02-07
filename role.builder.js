@@ -153,7 +153,18 @@ const roleBuilder = {
           return;
       }
 
-      // 4. 如果都找不到，请求喂养
+      // 4. 如果都找不到...
+      
+      // === 优化：如果有能量（哪怕没满），既然找不到补给，就先去干活，别傻等 ===
+      if (creep.store[RESOURCE_ENERGY] > 0) {
+          creep.memory.building = true;
+          delete creep.memory.requestingEnergy;
+          delete creep.memory.waitingTicks;
+          creep.say("🚧 work");
+          return;
+      }
+
+      // 5. 真的没能量了，请求喂养
       // 激活请求协议
       creep.memory.requestingEnergy = true;
       creep.memory.waitingTicks = (creep.memory.waitingTicks || 0) + 1;
