@@ -248,9 +248,7 @@ const roleHauler = {
         const source = Game.getObjectById(creep.memory.sourceId);
         if (source) {
           const containers = source.pos.findInRange(FIND_STRUCTURES, 2, {
-            filter: (s) =>
-              s.structureType === STRUCTURE_CONTAINER &&
-              s.store[RESOURCE_ENERGY] > 50,
+            filter: (s) => s.structureType === STRUCTURE_CONTAINER,
           });
           if (containers.length > 0) {
             targetContainer = containers[0];
@@ -269,6 +267,45 @@ const roleHauler = {
         if (containers.length > 0) {
           targetContainer = creep.pos.findClosestByPath(containers);
         }
+      }
+
+      // === 绑定 Container 的特殊逻辑：死等直到满 ===
+      // 如果目标是绑定的 Container，即使空了也要去，并且一直在那等到自己满
+      if (
+        targetContainer &&
+        creep.memory.sourceId &&
+        targetContainer.pos.inRangeTo(
+          Game.getObjectById(creep.memory.sourceId),
+          2,
+        )
+      ) {
+        // 尝试取货
+        if (targetContainer.store[RESOURCE_ENERGY] > 0) {
+          if (
+            creep.withdraw(targetContainer, RESOURCE_ENERGY) == ERR_NOT_IN_RANGE
+          ) {
+            moveModule.smartMove(creep, targetContainer, {
+              visualizePathStyle: { stroke: "#ffaa00" },
+            });
+          }
+        } else {
+          // 没货，但也要过去守着
+          if (!creep.pos.inRangeTo(targetContainer, 1)) {
+            moveModule.smartMove(creep, targetContainer, {
+              visualizePathStyle: { stroke: "#ffaa00" },
+            });
+          } else {
+            creep.say("⏳ waiting");
+          }
+        }
+
+        // 同时尝试捡脚下的掉落资源
+        const dropped = creep.pos.lookFor(LOOK_RESOURCES);
+        if (dropped.length > 0 && dropped[0].resourceType == RESOURCE_ENERGY) {
+          creep.pickup(dropped[0]);
+        }
+
+        return; // 强制留在这里，直到状态切换（满载）
       }
 
       // === 紧急取货逻辑 ===
