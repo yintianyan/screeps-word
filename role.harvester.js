@@ -77,9 +77,35 @@ const roleHarvester = {
         if (creep.pos.isNearTo(source)) {
           harvestPos = creep.pos;
         } else {
-          // 否则找一个可用的空位
-          // 这里简单地走向 Source，module.move 会自动处理路径，找一个能到的 Range 1
-          harvestPos = source.pos;
+          // 否则找一个可用的空位 (Range 1)
+          // 不再简单地走向 Source (这会导致叠罗汉)，而是显式寻找周围的空地
+          const area = creep.room.lookForAtArea(
+            LOOK_TERRAIN,
+            source.pos.y - 1,
+            source.pos.x - 1,
+            source.pos.y + 1,
+            source.pos.x + 1,
+            true,
+          );
+
+          let bestSpot = null;
+          for (const spot of area) {
+            if (spot.terrain === "wall") continue;
+            const pos = new RoomPosition(spot.x, spot.y, creep.room.name);
+            // 检查是否有 creep (除了自己)
+            const creepsHere = pos.lookFor(LOOK_CREEPS);
+            if (creepsHere.length === 0 || creepsHere[0].name === creep.name) {
+              bestSpot = pos;
+              break; // 找到一个就行
+            }
+          }
+
+          if (bestSpot) {
+            harvestPos = bestSpot;
+          } else {
+            // 如果实在没空位了，就只好排队（或者走向 Source 挤一挤）
+            harvestPos = source.pos;
+          }
         }
       }
 
@@ -92,7 +118,7 @@ const roleHarvester = {
             });
           }
         }
-        // 如果目标是具体坐标（Container）
+        // 如果目标是具体坐标（Container 或 空地）
         else {
           if (!creep.pos.isEqualTo(harvestPos)) {
             moveModule.smartMove(creep, harvestPos, {
@@ -100,6 +126,10 @@ const roleHarvester = {
             });
           } else {
             // === 到了位置，开始干活 (动作互斥：一 tick 只做一件事) ===
+            // 确保真的在范围内（防止 smartMove 还没到）
+            if (!creep.pos.isNearTo(source)) {
+              return; // 还没到
+            }
 
             // 1. 优先把能量存入附近的 Container (如果满了且有 Container)
             if (creep.store.getFreeCapacity() === 0) {

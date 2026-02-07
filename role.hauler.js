@@ -281,12 +281,17 @@ const roleHauler = {
       ) {
         // 尝试取货
         if (targetContainer.store[RESOURCE_ENERGY] > 0) {
-          if (
-            creep.withdraw(targetContainer, RESOURCE_ENERGY) == ERR_NOT_IN_RANGE
-          ) {
+          const withdrawResult = creep.withdraw(
+            targetContainer,
+            RESOURCE_ENERGY,
+          );
+          if (withdrawResult == ERR_NOT_IN_RANGE) {
             moveModule.smartMove(creep, targetContainer, {
               visualizePathStyle: { stroke: "#ffaa00" },
             });
+          } else if (withdrawResult == OK) {
+            // 取货成功，如果还没满，下一 tick 继续
+            // 如果满了，下个 tick 的状态切换逻辑会把它切成 hauling
           }
         } else {
           // 没货，但也要过去守着
@@ -299,9 +304,11 @@ const roleHauler = {
           }
         }
 
-        // 同时尝试捡脚下的掉落资源
-        const dropped = creep.pos.lookFor(LOOK_RESOURCES);
-        if (dropped.length > 0 && dropped[0].resourceType == RESOURCE_ENERGY) {
+        // 同时尝试捡脚下的掉落资源 (Range 1 范围内)
+        const dropped = creep.pos.findInRange(FIND_DROPPED_RESOURCES, 1, {
+          filter: (r) => r.resourceType === RESOURCE_ENERGY,
+        });
+        if (dropped.length > 0) {
           creep.pickup(dropped[0]);
         }
 
