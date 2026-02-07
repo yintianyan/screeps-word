@@ -77,18 +77,13 @@ const roleHauler = {
         });
       }
 
-      // 5. 如果还是没有，就填充其他 Container (例如 Controller Container)
-      // 注意：必须排除 Mining Container，否则会把能量运回 Source
-      if (targets.length === 0) {
-        targets = creep.room.find(FIND_STRUCTURES, {
-          filter: (s) => {
-            if (s.structureType !== STRUCTURE_CONTAINER) return false;
-            if (s.store.getFreeCapacity(RESOURCE_ENERGY) === 0) return false;
-
-            // 排除 Source 附近的 Container (Mining Container)
-            const nearbySource = s.pos.findInRange(FIND_SOURCES, 2);
-            return nearbySource.length === 0;
-          },
+      // 5. 如果还是没有，就填充 Controller Container (升级专用)
+      // 必须严格限定为 Controller 附近的 Container，防止运回 Source
+      if (targets.length === 0 && creep.room.controller) {
+        targets = creep.room.controller.pos.findInRange(FIND_STRUCTURES, 4, {
+          filter: (s) =>
+            s.structureType === STRUCTURE_CONTAINER &&
+            s.store.getFreeCapacity(RESOURCE_ENERGY) > 0,
         });
       }
 
