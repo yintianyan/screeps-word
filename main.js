@@ -6,6 +6,7 @@ const towerModule = require("module.tower");
 const monitorModule = require("module.monitor");
 const spawnerModule = require("module.spawner");
 const creepsModule = require("module.creeps");
+const trafficModule = require("module.traffic");
 
 // === Register Modules ===
 
@@ -20,6 +21,7 @@ Kernel.register("builder", autoBuilder);
 // 3. Defense & Monitoring - Room Level
 Kernel.register("tower", towerModule);
 Kernel.register("monitor", monitorModule);
+Kernel.register("traffic", trafficModule);
 
 // 4. Global Logic - Global Level
 Kernel.register("creeps", creepsModule, "global");

@@ -21,13 +21,7 @@ const autoBuilder = {
     const sources = room.find(FIND_SOURCES);
     sources.forEach((source) => {
       const path = spawn.pos.findPathTo(source, { ignoreCreeps: true });
-      path.forEach((step) => {
-        // 检查地形，不造在墙上 (Wall Road Cost = 45,000!)
-        const terrain = room.getTerrain().get(step.x, step.y);
-        if (terrain !== TERRAIN_MASK_WALL) {
-          room.createConstructionSite(step.x, step.y, STRUCTURE_ROAD);
-        }
-      });
+      this.buildHighway(room, path);
     });
 
     // 2. 自动建造道路 (Spawn -> Controller)
@@ -35,12 +29,7 @@ const autoBuilder = {
       const path = spawn.pos.findPathTo(room.controller, {
         ignoreCreeps: true,
       });
-      path.forEach((step) => {
-        const terrain = room.getTerrain().get(step.x, step.y);
-        if (terrain !== TERRAIN_MASK_WALL) {
-          room.createConstructionSite(step.x, step.y, STRUCTURE_ROAD);
-        }
-      });
+      this.buildHighway(room, path);
     }
 
     // 3. 自动建造 Extension (围绕 Spawn)
@@ -124,6 +113,49 @@ const autoBuilder = {
         const targetY = spawn.pos.y + 2;
         room.createConstructionSite(targetX, targetY, STRUCTURE_TOWER);
       }
+    }
+  },
+  /**
+   * 构建双车道高速公路 (Double-Lane Highway)
+   * 在路径的基础上，检查并构建相邻的第二条车道
+   * @param {Room} room
+   * @param {PathStep[]} path
+   */
+  buildHighway: function (room, path) {
+    path.forEach((step, index) => {
+      // 1. 构建主车道
+      this.createRoadSite(room, step.x, step.y);
+
+      // 2. 构建副车道 (Parallel Lane)
+      // 简单的逻辑：检查当前点到下一点的方向，然后在垂直方向偏移 1 格
+      // 如果是最后一点，沿用上一点的方向
+      let nextStep = path[index + 1];
+      let dx = 0;
+      let dy = 0;
+
+      if (nextStep) {
+        dx = nextStep.x - step.x;
+        dy = nextStep.y - step.y;
+      } else if (index > 0) {
+        let prevStep = path[index - 1];
+        dx = step.x - prevStep.x;
+        dy = step.y - prevStep.y;
+      }
+
+      // 计算垂直向量 (90度旋转)
+      // (dx, dy) -> (-dy, dx)
+      if (dx !== 0 || dy !== 0) {
+        const sideX = step.x - dy;
+        const sideY = step.y + dx;
+        this.createRoadSite(room, sideX, sideY);
+      }
+    });
+  },
+
+  createRoadSite: function (room, x, y) {
+    const terrain = room.getTerrain().get(x, y);
+    if (terrain !== TERRAIN_MASK_WALL) {
+      room.createConstructionSite(x, y, STRUCTURE_ROAD);
     }
   },
 };
