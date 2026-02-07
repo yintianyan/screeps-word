@@ -99,6 +99,23 @@ const roleHarvester = {
               visualizePathStyle: { stroke: "#ffaa00" },
             });
           } else {
+            // === 到了位置，开始干活 ===
+            
+            // 1. 优先把能量存入附近的 Container (如果满了且有 Container)
+            // 这解决了 "采集后并没有将资源存放在 container" 的问题
+            if (creep.store.getFreeCapacity() === 0) {
+                // 找 Range 1 内的 Container (不管是脚下的还是旁边的)
+                const nearbyContainer = creep.pos.findInRange(FIND_STRUCTURES, 1, {
+                    filter: s => s.structureType === STRUCTURE_CONTAINER && s.store.getFreeCapacity(RESOURCE_ENERGY) > 0
+                })[0];
+                
+                if (nearbyContainer) {
+                    creep.transfer(nearbyContainer, RESOURCE_ENERGY);
+                    return; // 这一 tick 做了 transfer，就不能 harvest 了
+                }
+            }
+
+            // 2. 否则继续挖矿
             creep.harvest(source);
           }
         }
