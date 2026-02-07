@@ -3,7 +3,7 @@ const populationModule = {
   config: {
     // 角色基础配比
     ratios: {
-      harvesterPerSource: 1, // 每个 Source 1 个 Harvester (已在 main.js 中强制绑定)
+      harvesterPerSource: 2, // 每个 Source 2 个 Harvester (保证采集速率跟上运输效率)
       haulerBaseCount: 1, // 基础 Hauler 数量 (冗余)
     },
     // 角色上限 (防止无限繁殖)
@@ -34,8 +34,8 @@ const populationModule = {
 
     if (haulers.length > 0) {
       // 有搬运工，Harvester 只需要负责挖
-      // 用户要求改回每个 Source 1 人
-      targets.harvester = sourceCount;
+      // 用户要求: 每个资源点分配两个采集者
+      targets.harvester = sourceCount * 2;
     } else {
       // 没搬运工，优先保证每个 Source 有一个 Harvester，然后立刻孵化 Hauler
       targets.harvester = sourceCount;

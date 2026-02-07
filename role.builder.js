@@ -138,14 +138,15 @@ const roleBuilder = {
       }
 
       // 3.5 紧急/便利取能：如果在 Spawn/Extension 附近 (Range 5)，且有能量，允许取用
-      // 这避免了在基地附近建设时傻等 Hauler
+      // 限制：必须保证 Spawn 有足够的能量进行正常孵化 (例如保留 300 能量)
       const nearbySpawnOrExt = creep.pos.findInRange(FIND_STRUCTURES, 5, {
         filter: (s) =>
           (s.structureType === STRUCTURE_SPAWN || s.structureType === STRUCTURE_EXTENSION) &&
           s.store[RESOURCE_ENERGY] > 0
       })[0];
       
-      if (nearbySpawnOrExt) {
+      // 只有当房间能量充足时才从 Spawn/Extension 取能
+      if (nearbySpawnOrExt && creep.room.energyAvailable > 300) {
           delete creep.memory.requestingEnergy;
           delete creep.memory.waitingTicks;
           

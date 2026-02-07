@@ -171,9 +171,9 @@ module.exports.loop = function () {
       }
     });
 
-    // 找到第一个缺人的 Source (目前设定为每个 Source 1 人)
+    // 找到第一个缺人的 Source (目前设定为每个 Source 2 人)
     for (const source of sources) {
-      if (sourceHarvesterCounts[source.id] < 1) {
+      if (sourceHarvesterCounts[source.id] < 2) {
         targetSource = source;
         break;
       }
