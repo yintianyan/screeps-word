@@ -35,6 +35,48 @@ const moveModule = {
         visualizePathStyle: { stroke: "#ffffff", lineStyle: "dashed" },
         reusePath: 10,
         ignoreCreeps: true,
+        // 添加 CostCallback 实现车道偏好
+        costCallback: function (roomName, costMatrix) {
+          if (roomName !== creep.room.name) return;
+
+          // 1. 获取基础交通拥堵矩阵 (如果需要避让)
+          // 只有当 stuckCount > 0 时才避让拥堵，否则只遵循车道规则
+          let matrix = costMatrix;
+
+          // 2. 叠加车道偏好 (Lane Bias)
+          // 计算大致方向
+          let direction = 0;
+          const dx = target.pos
+            ? target.pos.x - creep.pos.x
+            : target.x - creep.pos.x;
+          const dy = target.pos
+            ? target.pos.y - creep.pos.y
+            : target.y - creep.pos.y;
+
+          if (Math.abs(dy) > Math.abs(dx)) {
+            // Vertical
+            direction = dy < 0 ? TOP : BOTTOM;
+          } else {
+            // Horizontal
+            direction = dx < 0 ? LEFT : RIGHT;
+          }
+
+          if (direction) {
+            const laneMatrix = TrafficManager.getLaneMatrix(
+              creep.room,
+              direction,
+            );
+            if (laneMatrix) {
+              // 合并矩阵: PathFinder 会自动处理，但我们需要返回一个 CostMatrix
+              // 由于不能直接 merge 两个 CM，我们需要 clone 一个并叠加
+              // 或者，为了性能，我们直接返回 laneMatrix，并在其中动态叠加拥堵？
+              // 不，laneMatrix 是静态缓存的，不能修改。
+
+              // 方案：返回 laneMatrix。如果卡住了，PathFinder 会重新寻路，此时我们可能需要更强的避让
+              return laneMatrix;
+            }
+          }
+        },
       },
       opts,
     );
@@ -44,6 +86,7 @@ const moveModule = {
     // 这里的 "2" 是 stuckThreshold
     if (creep.memory._move.stuckCount >= 2) {
       // 1. 尝试交换 (Swap)
+      // 如果前方仅仅是因为被自己人挡住，且对方也可以移动，直接交换位置
       const path = creep.pos.findPathTo(target, {
         ignoreCreeps: true,
         range: opts.range || 1,
@@ -65,12 +108,14 @@ const moveModule = {
       }
 
       // 2. 交换失败，启动 "智能分流" (Smart Diversion)
-      // 使用 TrafficManager 生成的 CostMatrix，它会给拥堵的格子加高分
-      // 从而迫使 PathFinder 选择旁边的空闲车道 (Double-Lane Highway 的优势)
-      moveOpts.ignoreCreeps = false; // 必须设为 false 才能让 costCallback 生效? 不，pathFinder 此时需要自定义 matrix
+      // 强制避让拥堵 + 遵循车道
+      moveOpts.ignoreCreeps = false;
       moveOpts.costCallback = function (roomName, costMatrix) {
         if (roomName === creep.room.name) {
-          return TrafficManager.getTrafficMatrix(creep.room);
+          const trafficMatrix = TrafficManager.getTrafficMatrix(creep.room);
+          // 这里我们只返回拥堵矩阵，车道偏好在紧急避让时可以暂时忽略，或者需要合并
+          // 为了简单，紧急避让时优先考虑 trafficMatrix (避开人)
+          return trafficMatrix;
         }
       };
       moveOpts.reusePath = 0; // 重新寻路
