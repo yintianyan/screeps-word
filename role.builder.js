@@ -14,44 +14,33 @@ const roleBuilder = {
     }
 
     if (creep.memory.building) {
-      // 1. 优先维修：如果路上有损坏严重的建筑（耐久 < 50%），优先维修
-      // 特别是 Container 和 Road
-      const repairTargets = creep.room.find(FIND_STRUCTURES, {
+      // === 1. 紧急维修 (Critical Repair) ===
+      // 只有当建筑濒临损坏时，才强制优先维修
+      // Container < 20% (50k/250k)
+      // Road < 20% (1k/5k)
+      const criticalTargets = creep.room.find(FIND_STRUCTURES, {
         filter: (object) =>
-          (object.structureType === STRUCTURE_CONTAINER ||
-            object.structureType === STRUCTURE_ROAD) &&
-          object.hits < object.hitsMax * 0.5,
+          (object.structureType === STRUCTURE_CONTAINER && object.hits < object.hitsMax * 0.2) ||
+          (object.structureType === STRUCTURE_ROAD && object.hits < object.hitsMax * 0.2),
       });
 
-      // 按损坏程度排序，优先修最烂的
-      // 关键修改：按照 "Container优先 > 损坏比例" 的规则排序
-      repairTargets.sort((a, b) => {
-        // 如果一个是 Container，另一个不是，Container 优先
-        if (
-          a.structureType === STRUCTURE_CONTAINER &&
-          b.structureType !== STRUCTURE_CONTAINER
-        )
-          return -1;
-        if (
-          a.structureType !== STRUCTURE_CONTAINER &&
-          b.structureType === STRUCTURE_CONTAINER
-        )
-          return 1;
-
-        // 否则按损坏比例排序
-        return a.hits / a.hitsMax - b.hits / b.hitsMax;
-      });
-
-      if (repairTargets.length > 0) {
-        if (creep.repair(repairTargets[0]) == ERR_NOT_IN_RANGE) {
-          moveModule.smartMove(creep, repairTargets[0], {
+      if (criticalTargets.length > 0) {
+        // 优先修 Container
+        criticalTargets.sort((a, b) => {
+            if (a.structureType === STRUCTURE_CONTAINER && b.structureType !== STRUCTURE_CONTAINER) return -1;
+            if (a.structureType !== STRUCTURE_CONTAINER && b.structureType === STRUCTURE_CONTAINER) return 1;
+            return a.hits - b.hits; // 血量绝对值少的优先
+        });
+        
+        if (creep.repair(criticalTargets[0]) == ERR_NOT_IN_RANGE) {
+          moveModule.smartMove(creep, criticalTargets[0], {
             visualizePathStyle: { stroke: "#ff0000" },
           });
         }
-        return; // 如果在维修，就不去建造了
+        return; // 紧急任务，必须先做
       }
 
-      // 2. 其次建造
+      // === 2. 建造任务 (Construction) ===
       const targets = creep.room.find(FIND_CONSTRUCTION_SITES);
       if (targets.length) {
         // 使用 priorityModule 获取最佳目标
@@ -62,15 +51,36 @@ const roleBuilder = {
             visualizePathStyle: { stroke: "#ffffff" },
           });
         }
-      } else {
-        // 如果没有建筑工地，去升级控制器，避免闲置
-        if (
-          creep.upgradeController(creep.room.controller) == ERR_NOT_IN_RANGE
-        ) {
-          moveModule.smartMove(creep, creep.room.controller, {
-            visualizePathStyle: { stroke: "#ffffff" },
-          });
-        }
+        return; // 有工地就造，不进行后续的“闲时维修”
+      }
+
+      // === 3. 闲时维修 (Maintenance Repair) ===
+      // 如果没有工地，把路和 Container 补满
+      // Container < 80%
+      // Road < 80%
+      const maintenanceTargets = creep.room.find(FIND_STRUCTURES, {
+        filter: (object) =>
+          (object.structureType === STRUCTURE_CONTAINER ||
+            object.structureType === STRUCTURE_ROAD) &&
+          object.hits < object.hitsMax * 0.8,
+      });
+
+      if (maintenanceTargets.length > 0) {
+          maintenanceTargets.sort((a, b) => a.hits / a.hitsMax - b.hits / b.hitsMax);
+          if (creep.repair(maintenanceTargets[0]) == ERR_NOT_IN_RANGE) {
+              moveModule.smartMove(creep, maintenanceTargets[0], { visualizePathStyle: { stroke: "#00ff00" } });
+          }
+          return;
+      }
+
+      // === 4. 升级控制器 (Upgrade) ===
+      // 没事干了，去升级
+      if (
+        creep.upgradeController(creep.room.controller) == ERR_NOT_IN_RANGE
+      ) {
+        moveModule.smartMove(creep, creep.room.controller, {
+          visualizePathStyle: { stroke: "#ffffff" },
+        });
       }
     } else {
       // === 严格的定点/区域工作模式 ===
