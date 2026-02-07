@@ -103,12 +103,48 @@ module.exports.loop = function () {
         ? spawn.room.energyAvailable
         : spawn.room.energyCapacityAvailable;
 
-    if (counts.harvester < TARGETS.harvester) {
+    // === Harvester 孵化逻辑优化：按 Source 分配 ===
+    // 找出哪个 Source 缺人
+    const sources = spawn.room.find(FIND_SOURCES);
+    const harvesters = spawn.room.find(FIND_MY_CREEPS, {
+      filter: (c) => c.memory.role === "harvester",
+    });
+
+    let targetSource = null;
+
+    // 统计每个 Source 的 Harvester 数量
+    // 过滤掉即将死亡的 (ticksToLive < 100)，除非它是刚刚孵化出来的
+    const sourceHarvesterCounts = {};
+    sources.forEach((s) => (sourceHarvesterCounts[s.id] = 0));
+
+    harvesters.forEach((c) => {
+      // 如果 Creep 已经绑定了 Source，且寿命还长（或者正在孵化），则计入
+      if (c.memory.sourceId && (c.ticksToLive > 100 || c.spawning)) {
+        sourceHarvesterCounts[c.memory.sourceId]++;
+      }
+    });
+
+    // 找到第一个缺人的 Source (目前设定为每个 Source 1 人)
+    for (const source of sources) {
+      if (sourceHarvesterCounts[source.id] < 1) {
+        targetSource = source;
+        break;
+      }
+    }
+
+    if (targetSource) {
       const newBody = getBody(energyToUse, "harvester");
       const newName = "Harvester" + Game.time;
-      console.log("正在孵化新采集者: " + newName + " (" + newBody + ")");
+      console.log(
+        "正在孵化新采集者: " +
+          newName +
+          " (" +
+          newBody +
+          ") -> 绑定 Source: " +
+          targetSource.id,
+      );
       spawn.spawnCreep(newBody, newName, {
-        memory: { role: "harvester" },
+        memory: { role: "harvester", sourceId: targetSource.id },
       });
     } else if (
       counts.upgrader < 1 &&
