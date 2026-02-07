@@ -83,6 +83,10 @@ const roleBuilder = {
         creep.room.storage.store[RESOURCE_ENERGY] > 0 &&
         creep.pos.inRangeTo(creep.room.storage, 5)
       ) {
+        // 清除标志
+        delete creep.memory.requestingEnergy;
+        delete creep.memory.waitingTicks;
+
         if (
           creep.withdraw(creep.room.storage, RESOURCE_ENERGY) ==
           ERR_NOT_IN_RANGE
@@ -103,6 +107,9 @@ const roleBuilder = {
       })[0];
 
       if (nearbyContainer) {
+        delete creep.memory.requestingEnergy;
+        delete creep.memory.waitingTicks;
+
         if (
           creep.withdraw(nearbyContainer, RESOURCE_ENERGY) == ERR_NOT_IN_RANGE
         ) {
@@ -119,6 +126,9 @@ const roleBuilder = {
       })[0];
 
       if (dropped) {
+        delete creep.memory.requestingEnergy;
+        delete creep.memory.waitingTicks;
+
         if (creep.pickup(dropped) == ERR_NOT_IN_RANGE) {
           moveModule.smartMove(creep, dropped, {
             visualizePathStyle: { stroke: "#ffaa00" },
@@ -128,7 +138,11 @@ const roleBuilder = {
       }
 
       // 4. 如果都找不到，请求喂养
-      creep.say("🙏 wait");
+      // 激活请求协议
+      creep.memory.requestingEnergy = true;
+      creep.memory.waitingTicks = (creep.memory.waitingTicks || 0) + 1;
+
+      creep.say("🙏 wait " + creep.memory.waitingTicks);
       // 可以在这里寻找最近的 Construction Site 靠近，以免离得太远
       // ...
     }

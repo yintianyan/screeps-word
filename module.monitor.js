@@ -181,6 +181,59 @@ const monitorModule = {
 
     // 检查长时间等待的 Creep (需要配合 Memory)
     creeps.forEach((creep) => {
+      // 可视化请求状态
+      if (creep.memory.requestingEnergy) {
+        // 画一个黄色的圈表示正在请求
+        visual.circle(creep.pos, {
+          fill: "transparent",
+          radius: 0.5,
+          stroke: "#ffff00",
+          strokeWidth: 0.15,
+          opacity: 0.5,
+        });
+
+        // 如果等待时间过长 (>5 ticks)，画红圈并显示感叹号
+        if ((creep.memory.waitingTicks || 0) > 5) {
+          visual.circle(creep.pos, {
+            fill: "transparent",
+            radius: 0.7,
+            stroke: "#ff0000",
+            strokeWidth: 0.15,
+            opacity: 0.8,
+          });
+          visual.text(`!`, creep.pos.x, creep.pos.y + 0.2, {
+            color: "#ff0000",
+            font: 0.5,
+          });
+        }
+      }
+
+      // 可视化 Hauler 的目标连线
+      if (
+        creep.memory.role === "hauler" &&
+        creep.memory.hauling &&
+        creep.memory.targetId
+      ) {
+        const target = Game.getObjectById(creep.memory.targetId);
+        if (target) {
+          // 如果目标是 Creep，画绿线
+          if (target instanceof Creep) {
+            visual.line(creep.pos, target.pos, {
+              color: "#00ff00",
+              width: 0.15,
+              lineStyle: "dashed",
+            });
+          } else {
+            // 建筑画白线
+            visual.line(creep.pos, target.pos, {
+              color: "#ffffff",
+              width: 0.05,
+              opacity: 0.3,
+            });
+          }
+        }
+      }
+
       if (creep.store.getUsedCapacity() === 0) {
         // 如果空背包，记录等待时间
         if (!creep.memory.idleTicks) creep.memory.idleTicks = 0;

@@ -90,23 +90,33 @@ const roleHauler = {
         if (targets.length === 0) {
           const hungryCreeps = creep.room.find(FIND_MY_CREEPS, {
             filter: (c) => {
-              return (
-                (c.memory.role === "upgrader" || c.memory.role === "builder") &&
-                c.store[RESOURCE_ENERGY] < c.store.getCapacity() * 0.2
-              ); // 低于 20%
+              // 只要请求标志为 true
+              return c.memory.requestingEnergy;
             },
           });
 
           if (hungryCreeps.length > 0) {
-            // 优先喂 Upgrader
-            const hungryUpgraders = hungryCreeps.filter(
-              (c) => c.memory.role === "upgrader",
-            );
-            if (hungryUpgraders.length > 0) {
-              targets = hungryUpgraders;
-            } else {
-              targets = hungryCreeps;
-            }
+            // 优先喂 Builder > Upgrader (按用户新需求)
+            // 且优先满足等待时间过长 (>5 ticks) 的
+            targets = hungryCreeps.sort((a, b) => {
+              // 1. 强制共享检测
+              const forceA = (a.memory.waitingTicks || 0) > 5;
+              const forceB = (b.memory.waitingTicks || 0) > 5;
+              if (forceA !== forceB) return forceA ? -1 : 1;
+
+              // 2. 角色优先级
+              const rolePriority = { builder: 2, upgrader: 1 };
+              const priorityA = rolePriority[a.memory.role] || 0;
+              const priorityB = rolePriority[b.memory.role] || 0;
+              if (priorityA !== priorityB) return priorityB - priorityA;
+
+              // 3. 等待时间
+              return (
+                (b.memory.waitingTicks || 0) - (a.memory.waitingTicks || 0)
+              );
+            });
+            // 这里不需要 filter，sort 后 targets[0] 就是最好的，findClosestByPath 会再基于距离筛选
+            // 但为了让 findClosestByPath 有效，我们可能需要保留数组
           }
         }
 
@@ -157,17 +167,61 @@ const roleHauler = {
 
       // 3. 执行送货
       if (target) {
-        const result = creep.transfer(target, RESOURCE_ENERGY);
-        if (result == ERR_NOT_IN_RANGE) {
-          moveModule.smartMove(creep, target, {
-            visualizePathStyle: { stroke: "#ffffff" },
-          });
-        } else if (result == OK) {
-          // 传输成功
-          // 检查目标是否满了，或者自己是否空了
-          // 注意：transfer 是瞬间发生的，但 store 的更新要到下一 tick
-          // 这里我们不做预测，依靠下一 tick 的 isValid 检查来清除 targetId
-          // 如果自己空了，状态机会在下一 tick 自动切换到 collecting
+        // === 智能重定向逻辑 ===
+        // 在尝试传输前，先检查目标是否已满 (对于 Structure)
+        // 如果已满，立即扫描周围 3 格内是否有请求能量的 Creep
+        let redirected = false;
+
+        if (
+          target.structureType &&
+          target.store.getFreeCapacity(RESOURCE_ENERGY) === 0
+        ) {
+          // 目标已满！
+          const nearbyRequestingCreeps = creep.pos.findInRange(
+            FIND_MY_CREEPS,
+            3,
+            {
+              filter: (c) => c.memory.requestingEnergy,
+            },
+          );
+
+          if (nearbyRequestingCreeps.length > 0) {
+            // 按优先级排序：Builder > Upgrader > Other
+            // 且优先满足等待时间最长的 (waitingTicks)
+            const bestCreep = nearbyRequestingCreeps.sort((a, b) => {
+              const rolePriority = { builder: 2, upgrader: 1 };
+              const priorityA = rolePriority[a.memory.role] || 0;
+              const priorityB = rolePriority[b.memory.role] || 0;
+
+              if (priorityA !== priorityB) return priorityB - priorityA; // 高优先
+              return (
+                (b.memory.waitingTicks || 0) - (a.memory.waitingTicks || 0)
+              ); // 长等待优先
+            })[0];
+
+            if (bestCreep) {
+              console.log(
+                `${creep.name} redirected energy from full ${target.structureType} to ${bestCreep.name} (${bestCreep.memory.role})`,
+              );
+              creep.transfer(bestCreep, RESOURCE_ENERGY);
+              // 可选：更新 targetId 以便下一 tick 继续喂它（如果还有货）
+              // creep.memory.targetId = bestCreep.id;
+              redirected = true;
+            }
+          }
+        }
+
+        if (!redirected) {
+          const result = creep.transfer(target, RESOURCE_ENERGY);
+          if (result == ERR_NOT_IN_RANGE) {
+            moveModule.smartMove(creep, target, {
+              visualizePathStyle: { stroke: "#ffffff" },
+            });
+          } else if (result == ERR_FULL) {
+            // 如果返回 ERR_FULL (虽然上面预判了，但多加一层保险)
+            // 清除目标，让下一 tick 重新寻找
+            delete creep.memory.targetId;
+          }
         }
       } else {
         // 如果真的没有任何地方可送 (且背包有货)

@@ -13,6 +13,10 @@ const roleUpgrader = {
     }
 
     if (creep.memory.upgrading) {
+      // 工作状态：清除请求标志
+      delete creep.memory.requestingEnergy;
+      delete creep.memory.waitingTicks;
+
       if (creep.upgradeController(creep.room.controller) == ERR_NOT_IN_RANGE) {
         moveModule.smartMove(creep, creep.room.controller, {
           visualizePathStyle: { stroke: "#ffffff" },
@@ -35,6 +39,10 @@ const roleUpgrader = {
       )[0];
 
       if (controllerContainer) {
+        // 找到了 Container，清除请求
+        delete creep.memory.requestingEnergy;
+        delete creep.memory.waitingTicks;
+
         if (
           creep.withdraw(controllerContainer, RESOURCE_ENERGY) ==
           ERR_NOT_IN_RANGE
@@ -50,8 +58,9 @@ const roleUpgrader = {
       // const controllerLink = ... (待实现)
 
       // 3. 如果都没有，原地等待 Hauler 喂养
-      // 为了让 Hauler 知道我们需要喂养，我们可以设置一个标志位或者仅仅依靠 store == 0
-      // 只要我们离 Controller 很近，Hauler 就会根据逻辑来喂我们
+      // 激活请求协议
+      creep.memory.requestingEnergy = true;
+      creep.memory.waitingTicks = (creep.memory.waitingTicks || 0) + 1;
 
       if (!creep.pos.inRangeTo(creep.room.controller, 3)) {
         // 如果离得太远，先走到 Controller 旁边待命
@@ -60,7 +69,7 @@ const roleUpgrader = {
         });
       } else {
         // 到了位置，原地等待
-        creep.say("🙏 wait");
+        creep.say("🙏 wait " + creep.memory.waitingTicks);
         // 可以在这里做一个简单的动画或者记录等待时间
       }
     }
