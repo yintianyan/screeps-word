@@ -45,8 +45,11 @@ const spawnerModule = {
             const energyCapacity = room.energyCapacityAvailable;
             
             // Determine energy budget (Emergency if harvester)
-            const isEmergency = bestRequest.role === 'harvester' && 
-                                room.find(FIND_MY_CREEPS, {filter: c => c.memory.role === 'harvester'}).length <= 1;
+            // Use Lifecycle.isOperational to properly detect if we are effectively out of harvesters
+            const operationalHarvesters = room.find(FIND_MY_CREEPS, {
+                filter: c => c.memory.role === 'harvester' && Lifecycle.isOperational(c)
+            });
+            const isEmergency = bestRequest.role === 'harvester' && operationalHarvesters.length <= 1;
             const energyToUse = isEmergency ? energyAvailable : energyCapacity;
 
             const body = this.getBody(energyToUse, bestRequest.role);
@@ -113,13 +116,16 @@ const spawnerModule = {
             const harvesters = creeps.filter(c => c.memory.role === 'harvester');
             const sourceCounts = {};
             sources.forEach(s => sourceCounts[s.id] = 0);
+            
+            // Count using Lifecycle.isOperational
             harvesters.forEach(c => {
-                if (c.memory.sourceId && (c.ticksToLive > 100 || c.spawning)) {
+                if (c.memory.sourceId && Lifecycle.isOperational(c)) {
                     sourceCounts[c.memory.sourceId]++;
                 }
             });
             
-            let targetSource = sources.find(s => sourceCounts[s.id] < 2); // Hardcoded 2 per source
+            // Find a source with 0 harvesters (Target is 1 now)
+            let targetSource = sources.find(s => sourceCounts[s.id] < 1); 
             let hasEmpty = sources.some(s => sourceCounts[s.id] === 0);
             
             const energyToUse = (counts.harvester === 0 || hasEmpty) 
