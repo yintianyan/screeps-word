@@ -71,19 +71,52 @@ module.exports.loop = function () {
       // 2. 采集者 (Harvester): 固定不动 (Stationary)
       // 配置: Max WORK + Min CARRY + Min MOVE
       if (role === "harvester") {
-        // Late Game (RCL 3+, Energy >= 750)
-        // 5 WORK (100% 满速) + 2 CARRY (100容量) + 3 MOVE (足以移动到 Source)
-        // Cost: 500 + 100 + 150 = 750
-        if (capacity >= 750)
-          return [WORK, WORK, WORK, WORK, WORK, CARRY, CARRY, MOVE, MOVE, MOVE];
+        // Late Game (RCL 8, Energy >= 1200+)
+        // 用户要求: 8-10 个 WORK
+        // 10 WORK = 1000 cost, + CARRY(50) + MOVE(50) = 1100
+        if (capacity >= 1100)
+          return [
+            WORK,
+            WORK,
+            WORK,
+            WORK,
+            WORK,
+            WORK,
+            WORK,
+            WORK,
+            WORK,
+            WORK,
+            CARRY,
+            MOVE,
+          ];
 
-        // Mid Game (RCL 2, Energy >= 550)
-        // 4 WORK + 1 CARRY + 2 MOVE
-        // Cost: 400 + 50 + 100 = 550
-        if (capacity >= 550) return [WORK, WORK, WORK, WORK, CARRY, MOVE, MOVE];
+        // Mid-Late Game (RCL 6-7, Energy >= 800)
+        // 8 WORK = 800 cost, + CARRY + MOVE = 900
+        if (capacity >= 900)
+          return [WORK, WORK, WORK, WORK, WORK, WORK, WORK, WORK, CARRY, MOVE];
 
-        // Early Game
+        // Mid Game (RCL 5, Energy >= 650)
+        // 用户要求: 5-6 个 WORK
+        // 6 WORK = 600 cost, + CARRY + MOVE = 700
+        if (capacity >= 700)
+          return [WORK, WORK, WORK, WORK, WORK, WORK, CARRY, MOVE];
+
+        // 5 WORK = 500 cost, + CARRY + MOVE = 600
+        if (capacity >= 600) return [WORK, WORK, WORK, WORK, WORK, CARRY, MOVE];
+
+        // Early Game (RCL 1-4)
+        // 用户要求: 3-5 个 WORK
+
+        // RCL 2 (Energy 550): 5 WORK (500) + MOVE (50) = 550 (无 CARRY，需脚下有 Container 或 Link，或者放弃 CARRY)
+        // 为了安全起见，RCL 2 最好还是带个 CARRY 或者 4 WORK
+        // 4 WORK (400) + CARRY (50) + MOVE (50) = 500
+        if (capacity >= 500) return [WORK, WORK, WORK, WORK, CARRY, MOVE];
+
+        // RCL 1-2 Transition (Energy 300-450)
+        // 3 WORK (300) - 无法移动
+        // 2 WORK (200) + CARRY (50) + MOVE (50) = 300
         if (capacity >= 300) return [WORK, WORK, CARRY, MOVE];
+
         return [WORK, CARRY, MOVE];
       }
 
