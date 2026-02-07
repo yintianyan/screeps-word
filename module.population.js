@@ -209,14 +209,14 @@ const populationModule = {
       if (criticalSites.length > 0) {
         targets.builder = 2; // 关键设施优先
       } else if (sites.length > 0) {
-        if (storedPercentage > 0.5) {
-          // 能源充足 (>50%)，全力建造
+        if (storedPercentage > 0.7) {
+          // 能源充足，全力建造
           targets.builder = 3;
-        } else if (storedPercentage > 0.2) {
-          // 能源一般 (>20%)，维持最低建造 (1个)
+        } else if (storedPercentage > 0.4) {
+          // 能源一般，维持最低建造 (1个)
           targets.builder = 1;
         } else {
-          // 能源不足 (< 20%)，停止建造，专注挖矿
+          // 能源不足 (< 40%)，停止建造，专注挖矿
           targets.builder = 0;
         }
       }

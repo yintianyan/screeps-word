@@ -68,7 +68,7 @@ const roleBuilder = {
       }
 
       // === 2. 建造任务 (Construction) ===
-      // 只有当 Room Storage/Container 能量 > 20% 时才允许建造 (除非是关键设施)
+      // 只有当 Room Storage/Container 能量 > 70% 时才允许建造 (除非是关键设施)
       // 计算能量比例
       let storedPercentage = 0;
       if (creep.room.storage) {
@@ -99,8 +99,8 @@ const roleBuilder = {
           s.structureType === STRUCTURE_CONTAINER,
       );
 
-      // 如果有关键设施，或者能量充足 (> 20%)，才进行建造
-      if (criticalSites.length > 0 || storedPercentage > 0.2) {
+      // 如果有关键设施，或者能量充足 (> 70%)，才进行建造
+      if (criticalSites.length > 0 || storedPercentage > 0.7) {
         const buildTargets = criticalSites.length > 0 ? criticalSites : targets;
         // 使用 priorityModule 获取最佳目标
         const target = priorityModule.getBestTarget(buildTargets, creep.pos);
