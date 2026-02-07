@@ -193,6 +193,77 @@ const populationModule = {
 
     return needs;
   },
+
+  /**
+   * 动态平衡搬运工分配
+   * 将多余的搬运工从富裕的 Source 调拨到紧缺的 Source
+   * @param {Room} room
+   */
+  rebalanceHaulers: function (room) {
+    const needs = this.getHaulerNeeds(room);
+    const haulers = room.find(FIND_MY_CREEPS, {
+      filter: (c) => c.memory.role === "hauler" && c.ticksToLive > 100,
+    });
+
+    // 1. 统计现状
+    const currentCounts = {};
+    const surplus = []; // [creep, sourceId]
+    const deficit = []; // [sourceId, amount]
+
+    // 初始化计数
+    Object.keys(needs).forEach((id) => (currentCounts[id] = 0));
+
+    haulers.forEach((c) => {
+      if (c.memory.sourceId) {
+        currentCounts[c.memory.sourceId] =
+          (currentCounts[c.memory.sourceId] || 0) + 1;
+      }
+    });
+
+    // 2. 识别过剩和短缺
+    for (const sourceId in needs) {
+      const diff = (currentCounts[sourceId] || 0) - needs[sourceId];
+      if (diff > 0) {
+        // 找出该 Source 下所有的 Hauler
+        const sourceHaulers = haulers.filter(
+          (c) => c.memory.sourceId === sourceId,
+        );
+        // 标记多余的 Hauler (取 diff 个)
+        for (let i = 0; i < diff; i++) {
+          if (sourceHaulers[i]) {
+            surplus.push(sourceHaulers[i]);
+          }
+        }
+      } else if (diff < 0) {
+        deficit.push({ id: sourceId, amount: -diff });
+      }
+    }
+
+    // 3. 执行调拨
+    if (surplus.length > 0 && deficit.length > 0) {
+      console.log(
+        `[Population] Rebalancing Haulers: Surplus ${surplus.length}, Deficit ${deficit.reduce((a, b) => a + b.amount, 0)}`,
+      );
+
+      let surplusIndex = 0;
+      for (const item of deficit) {
+        for (let i = 0; i < item.amount; i++) {
+          if (surplusIndex >= surplus.length) break;
+
+          const creep = surplus[surplusIndex++];
+          const oldSource = creep.memory.sourceId;
+
+          // 执行重新分配
+          creep.memory.sourceId = item.id;
+          delete creep.memory.targetId; // 清除旧目标的锁定
+          creep.say("🔀 reassign");
+          console.log(
+            `[Population] Reassigning ${creep.name} from Source ${oldSource} to ${item.id}`,
+          );
+        }
+      }
+    }
+  },
 };
 
 module.exports = populationModule;

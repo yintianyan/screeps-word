@@ -27,6 +27,11 @@ module.exports.loop = function () {
 
     towerModule.run(Game.spawns["Spawn1"].room);
     monitorModule.run(Game.spawns["Spawn1"].room);
+
+    // 动态再分配搬运工 (每 5 tick)
+    if (Game.time % 5 === 0) {
+      populationModule.rebalanceHaulers(Game.spawns["Spawn1"].room);
+    }
   }
 
   // 2. 孵化逻辑
