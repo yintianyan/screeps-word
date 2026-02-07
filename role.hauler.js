@@ -23,6 +23,38 @@ const roleHauler = {
       }
     }
 
+    // === 防死锁逻辑 (Anti-Deadlock) ===
+    // 如果正在去取货 (!hauling)，但是身上有能量，且被堵住了
+    if (!creep.memory.hauling && creep.store[RESOURCE_ENERGY] > 0) {
+      // 检查是否被堵 (位置未变)
+      if (
+        creep.memory.lastPos &&
+        creep.pos.x === creep.memory.lastPos.x &&
+        creep.pos.y === creep.memory.lastPos.y
+      ) {
+        creep.memory.stuckCount = (creep.memory.stuckCount || 0) + 1;
+      } else {
+        creep.memory.stuckCount = 0;
+        creep.memory.lastPos = creep.pos;
+      }
+
+      // 如果堵了 3 tick，且身上有货，直接切换去送货
+      // "挤不进去就不取了，先把身上的送走"
+      if (creep.memory.stuckCount > 3) {
+        creep.memory.hauling = true;
+        creep.memory.stuckCount = 0;
+        delete creep.memory.targetId; // 清除可能锁定的取货目标
+        creep.say("😒 give up");
+        console.log(
+          `[Hauler] ${creep.name} stuck while fetching, switching to hauling (Energy: ${creep.store[RESOURCE_ENERGY]})`,
+        );
+      }
+    } else {
+      // 如果在动或者没能量，重置计数
+      creep.memory.stuckCount = 0;
+      creep.memory.lastPos = creep.pos;
+    }
+
     if (creep.memory.hauling) {
       // === 送货模式 ===
 
@@ -337,6 +369,19 @@ const roleHauler = {
         });
         if (dropped.length > 0) {
           creep.pickup(dropped[0]);
+        }
+
+        // === 提前离开逻辑 ===
+        // 如果 Container 空了（或几乎空了），且自己身上已经有不少能量 (>50%)，
+        // 不要死等，直接去送货。这能缓解拥堵，并提高周转率。
+        const containerEnergy = targetContainer.store[RESOURCE_ENERGY];
+        const myEnergy = creep.store[RESOURCE_ENERGY];
+        const myCapacity = creep.store.getCapacity(RESOURCE_ENERGY);
+
+        if (containerEnergy < 50 && myEnergy > myCapacity * 0.5) {
+          creep.memory.hauling = true;
+          creep.say("🏃 early");
+          return;
         }
 
         return; // 强制留在这里，直到状态切换（满载）
