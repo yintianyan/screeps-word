@@ -58,49 +58,66 @@ const populationModule = {
       targets.hauler = 1;
     }
 
-    // 3. Builder:
-    // 取决于是否有工地
+    // 3. Smart Spender Balancing (Builder vs Upgrader)
+    // 智能平衡建造者和升级者：基于“建设紧迫度”和“能量水平”
     const sites = room.find(FIND_CONSTRUCTION_SITES);
-    const containerSites = sites.filter(
-      (s) => s.structureType === STRUCTURE_CONTAINER,
+    const criticalSites = sites.filter(
+      (s) =>
+        s.structureType === STRUCTURE_EXTENSION ||
+        s.structureType === STRUCTURE_SPAWN ||
+        s.structureType === STRUCTURE_TOWER ||
+        s.structureType === STRUCTURE_STORAGE ||
+        s.structureType === STRUCTURE_CONTAINER,
     );
 
-    if (sites.length > 0) {
-      if (containerSites.length > 0) {
-        // 紧急基建模式：有 Container 要造，提高 Builder 数量
-        targets.builder = this.config.limits.builder;
-      } else {
-        // 普通建造模式
-        targets.builder = Math.min(
-          this.config.limits.builder,
-          1 + Math.floor(sites.length / 5),
-        );
-      }
+    // 默认配置
+    targets.builder = 0;
+    const energyRatio = room.energyAvailable / room.energyCapacityAvailable;
+
+    if (criticalSites.length > 0) {
+      // === 关键基建模式 (Critical Infrastructure) ===
+      // 优先保证基建速度 (Extensions/Towers/Storage)
+      targets.builder = 2; // 至少 2 个 Builder
+      targets.upgrader = 1; // 仅维持 Controller 不降级，节省能量给基建
+    } else if (sites.length > 0) {
+      // === 普通维护模式 (Maintenance/Roads) ===
+      // 均衡发展
+      targets.builder = 1; // 1 个 Builder 慢慢修路
+      // Upgrader 根据能量决定
+      targets.upgrader = energyRatio > 0.8 ? 2 : 1;
     } else {
+      // === 极速发展模式 (Development) ===
+      // 全力冲刺 RCL
       targets.builder = 0;
+      if (energyRatio > 0.8) {
+        targets.upgrader = this.config.limits.upgrader; // 3
+      } else if (energyRatio > 0.5) {
+        targets.upgrader = 2;
+      } else {
+        targets.upgrader = 1;
+      }
     }
 
-    // 4. Upgrader:
-    // 紧急状态检查：如果控制器即将降级 (< 4000 ticks)，强制提升 Upgrader 优先级
+    // 4. 紧急覆盖 (Emergency Overrides)
+    // 如果控制器即将降级 (< 4000 ticks)，强制进入救援模式
     if (room.controller && room.controller.ticksToDowngrade < 4000) {
       console.log("🚨 紧急警报：控制器即将降级！进入救援模式！");
       targets.upgrader = this.config.limits.upgrader;
-      targets.builder = 0; // 暂停基建，全力救火
+      targets.builder = 0; // 暂停基建
     }
-    // 如果有 Container 正在建造，减少 Upgrader 以节省能量和 Spawn 队列
-    else if (containerSites.length > 0) {
-      targets.upgrader = 1;
-    } else {
-      // 正常模式：根据能量富裕程度调整
-      const energyRatio = room.energyAvailable / room.energyCapacityAvailable;
-      if (energyRatio > 0.8) {
-        targets.upgrader = this.config.limits.upgrader;
-      } else if (energyRatio > 0.3) {
-        targets.upgrader = 2;
-      } else {
-        targets.upgrader = 1; // 至少保持 1 个升级防止掉级
-      }
+
+    // 限制上限
+    targets.builder = Math.min(targets.builder, this.config.limits.builder);
+    targets.upgrader = Math.min(targets.upgrader, this.config.limits.upgrader);
+
+    // 5. 搬运工保留 (Hauler Reservation)
+    // 如果有 Upgrader 工作，必须额外保留至少 1 个 Hauler 作为专用/机动运力
+    // 防止所有 Hauler 都绑定在 Source 上，导致 Controller 端断供
+    if (targets.upgrader > 0) {
+      targets.hauler += 1;
     }
+    // 再次检查 Hauler 上限
+    targets.hauler = Math.min(targets.hauler, this.config.limits.hauler);
 
     return targets;
   },
