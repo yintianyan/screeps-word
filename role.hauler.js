@@ -125,15 +125,26 @@ const roleHauler = {
         };
 
         // 优先级 1: Spawn / Extension
-        targets = creep.room.find(FIND_STRUCTURES, {
+        // 策略：严格优先。只要有不满的 Spawn/Extension，绝不送去其他地方。
+        // 1. 找出所有不满的 Spawn/Extension
+        const unfilledSpawns = creep.room.find(FIND_STRUCTURES, {
           filter: (structure) => {
             return (
               (structure.structureType == STRUCTURE_EXTENSION ||
                 structure.structureType == STRUCTURE_SPAWN) &&
-              filterSaturated(structure)
+              structure.store.getFreeCapacity(RESOURCE_ENERGY) > 0
             );
           },
         });
+
+        // 2. 优先找其中“未饱和”的（即还没有人去送的）
+        targets = unfilledSpawns.filter((s) => filterSaturated(s));
+
+        // 3. 如果所有不满的都已经有人送了（targets 为空），但依然有不满的存在
+        // 为了严格遵守“Spawn 最高优先级”，我们宁可多人送同一个，也不能去送 Tower
+        if (targets.length === 0 && unfilledSpawns.length > 0) {
+          targets = unfilledSpawns;
+        }
 
         // 优先级 2: Tower
         if (targets.length === 0) {
@@ -151,8 +162,22 @@ const roleHauler = {
         if (targets.length === 0) {
           const hungryCreeps = creep.room.find(FIND_MY_CREEPS, {
             filter: (c) => {
-              // 只要请求标志为 true，且未被满足
-              return c.memory.requestingEnergy && filterSaturated(c);
+              // 1. 基本条件：请求能量且未饱和
+              if (!c.memory.requestingEnergy || !filterSaturated(c))
+                return false;
+
+              // 2. 检查 Creep 附近 (Range 3) 是否有带能量的 Container/Storage
+              // 如果有，说明它自己可以去取，搬运工不要浪费时间跑过去
+              const nearbyStorage = c.pos.findInRange(FIND_STRUCTURES, 3, {
+                filter: (s) =>
+                  (s.structureType == STRUCTURE_CONTAINER ||
+                    s.structureType == STRUCTURE_STORAGE) &&
+                  s.store[RESOURCE_ENERGY] > 50, // 至少有点存货
+              });
+
+              if (nearbyStorage.length > 0) return false;
+
+              return true;
             },
           });
 

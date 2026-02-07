@@ -112,7 +112,10 @@ const roleHarvester = {
       if (harvestPos) {
         // 如果目标是 Source 本身（说明是要去 Range 1 的位置），且不在范围内
         if (harvestPos.isEqualTo(source.pos)) {
-          if (creep.harvest(source) == ERR_NOT_IN_RANGE) {
+          const result = creep.harvest(source);
+          if (result == OK) {
+            creep.memory.harvestTicks = (creep.memory.harvestTicks || 0) + 1;
+          } else if (result == ERR_NOT_IN_RANGE) {
             moveModule.smartMove(creep, source, {
               visualizePathStyle: { stroke: "#ffaa00" },
             });
@@ -215,7 +218,9 @@ const roleHarvester = {
             if (creep.store.getFreeCapacity() === 0) {
               creep.say("⬇️ drop");
             }
-            creep.harvest(source);
+            if (creep.harvest(source) === OK) {
+              creep.memory.harvestTicks = (creep.memory.harvestTicks || 0) + 1;
+            }
           }
         }
       }
@@ -224,7 +229,10 @@ const roleHarvester = {
       // 没有 Hauler，自己挖自己运
       if (creep.store.getFreeCapacity() > 0) {
         // 还有空位，去挖矿
-        if (creep.harvest(source) == ERR_NOT_IN_RANGE) {
+        const result = creep.harvest(source);
+        if (result == OK) {
+          creep.memory.harvestTicks = (creep.memory.harvestTicks || 0) + 1;
+        } else if (result == ERR_NOT_IN_RANGE) {
           moveModule.smartMove(creep, source, {
             visualizePathStyle: { stroke: "#ffaa00" },
           });
