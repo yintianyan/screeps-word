@@ -20,20 +20,36 @@ const roleBuilder = {
       // Road < 20% (1k/5k)
       const criticalTargets = creep.room.find(FIND_STRUCTURES, {
         filter: (object) =>
-          (object.structureType === STRUCTURE_CONTAINER && object.hits < object.hitsMax * 0.2) ||
-          (object.structureType === STRUCTURE_ROAD && object.hits < object.hitsMax * 0.2),
+          (object.structureType === STRUCTURE_CONTAINER &&
+            object.hits < object.hitsMax * 0.2) ||
+          (object.structureType === STRUCTURE_ROAD &&
+            object.hits < object.hitsMax * 0.2),
       });
 
       if (criticalTargets.length > 0) {
         // 优先修 Container
         criticalTargets.sort((a, b) => {
-            if (a.structureType === STRUCTURE_CONTAINER && b.structureType !== STRUCTURE_CONTAINER) return -1;
-            if (a.structureType !== STRUCTURE_CONTAINER && b.structureType === STRUCTURE_CONTAINER) return 1;
-            return a.hits - b.hits; // 血量绝对值少的优先
+          if (
+            a.structureType === STRUCTURE_CONTAINER &&
+            b.structureType !== STRUCTURE_CONTAINER
+          )
+            return -1;
+          if (
+            a.structureType !== STRUCTURE_CONTAINER &&
+            b.structureType === STRUCTURE_CONTAINER
+          )
+            return 1;
+          return a.hits - b.hits; // 血量绝对值少的优先
         });
-        
-        if (creep.repair(criticalTargets[0]) == ERR_NOT_IN_RANGE) {
-          moveModule.smartMove(creep, criticalTargets[0], {
+
+        const target = criticalTargets[0];
+        creep.say("🔧 critical");
+        console.log(
+          `[Builder] ${creep.name} performing CRITICAL REPAIR on ${target.structureType} at ${target.pos} (Hits: ${target.hits}/${target.hitsMax})`,
+        );
+
+        if (creep.repair(target) == ERR_NOT_IN_RANGE) {
+          moveModule.smartMove(creep, target, {
             visualizePathStyle: { stroke: "#ff0000" },
           });
         }
@@ -46,10 +62,14 @@ const roleBuilder = {
         // 使用 priorityModule 获取最佳目标
         const target = priorityModule.getBestTarget(targets, creep.pos);
 
-        if (creep.build(target) == ERR_NOT_IN_RANGE) {
-          moveModule.smartMove(creep, target, {
-            visualizePathStyle: { stroke: "#ffffff" },
-          });
+        if (target) {
+          creep.say("🔨 build");
+          // console.log(`[Builder] ${creep.name} building ${target.structureType} at ${target.pos}`);
+          if (creep.build(target) == ERR_NOT_IN_RANGE) {
+            moveModule.smartMove(creep, target, {
+              visualizePathStyle: { stroke: "#ffffff" },
+            });
+          }
         }
         return; // 有工地就造，不进行后续的“闲时维修”
       }
@@ -66,18 +86,23 @@ const roleBuilder = {
       });
 
       if (maintenanceTargets.length > 0) {
-          maintenanceTargets.sort((a, b) => a.hits / a.hitsMax - b.hits / b.hitsMax);
-          if (creep.repair(maintenanceTargets[0]) == ERR_NOT_IN_RANGE) {
-              moveModule.smartMove(creep, maintenanceTargets[0], { visualizePathStyle: { stroke: "#00ff00" } });
-          }
-          return;
+        maintenanceTargets.sort(
+          (a, b) => a.hits / a.hitsMax - b.hits / b.hitsMax,
+        );
+        const target = maintenanceTargets[0];
+        creep.say("🔧 repair");
+
+        if (creep.repair(target) == ERR_NOT_IN_RANGE) {
+          moveModule.smartMove(creep, target, {
+            visualizePathStyle: { stroke: "#00ff00" },
+          });
+        }
+        return;
       }
 
       // === 4. 升级控制器 (Upgrade) ===
       // 没事干了，去升级
-      if (
-        creep.upgradeController(creep.room.controller) == ERR_NOT_IN_RANGE
-      ) {
+      if (creep.upgradeController(creep.room.controller) == ERR_NOT_IN_RANGE) {
         moveModule.smartMove(creep, creep.room.controller, {
           visualizePathStyle: { stroke: "#ffffff" },
         });
@@ -148,30 +173,35 @@ const roleBuilder = {
       // 限制：必须保证 Spawn 有足够的能量进行正常孵化 (例如保留 300 能量)
       const nearbySpawnOrExt = creep.pos.findInRange(FIND_STRUCTURES, 5, {
         filter: (s) =>
-          (s.structureType === STRUCTURE_SPAWN || s.structureType === STRUCTURE_EXTENSION) &&
-          s.store[RESOURCE_ENERGY] > 0
+          (s.structureType === STRUCTURE_SPAWN ||
+            s.structureType === STRUCTURE_EXTENSION) &&
+          s.store[RESOURCE_ENERGY] > 0,
       })[0];
-      
+
       // 只有当房间能量充足时才从 Spawn/Extension 取能
       if (nearbySpawnOrExt && creep.room.energyAvailable > 300) {
-          delete creep.memory.requestingEnergy;
-          delete creep.memory.waitingTicks;
-          
-          if (creep.withdraw(nearbySpawnOrExt, RESOURCE_ENERGY) == ERR_NOT_IN_RANGE) {
-              moveModule.smartMove(creep, nearbySpawnOrExt, { visualizePathStyle: { stroke: "#ffaa00" } });
-          }
-          return;
+        delete creep.memory.requestingEnergy;
+        delete creep.memory.waitingTicks;
+
+        if (
+          creep.withdraw(nearbySpawnOrExt, RESOURCE_ENERGY) == ERR_NOT_IN_RANGE
+        ) {
+          moveModule.smartMove(creep, nearbySpawnOrExt, {
+            visualizePathStyle: { stroke: "#ffaa00" },
+          });
+        }
+        return;
       }
 
       // 4. 如果都找不到...
-      
+
       // === 优化：如果有能量（哪怕没满），既然找不到补给，就先去干活，别傻等 ===
       if (creep.store[RESOURCE_ENERGY] > 0) {
-          creep.memory.building = true;
-          delete creep.memory.requestingEnergy;
-          delete creep.memory.waitingTicks;
-          creep.say("🚧 work");
-          return;
+        creep.memory.building = true;
+        delete creep.memory.requestingEnergy;
+        delete creep.memory.waitingTicks;
+        creep.say("🚧 work");
+        return;
       }
 
       // 5. 真的没能量了，请求喂养
