@@ -3,6 +3,18 @@ const moveModule = require("module.move");
 const roleUpgrader = {
   /** @param {Creep} creep **/
   run: function (creep) {
+    // === 危机模式检查 (Crisis Mode Check) ===
+    // 如果房间处于能源危机，且 Controller 并不危险，停止工作以节省能源
+    if (
+      creep.room.memory.energyState === "CRISIS" &&
+      creep.room.controller.ticksToDowngrade > 4000
+    ) {
+      creep.say("🚫 crisis");
+      // 找个不碍事的地方呆着
+      moveModule.parkOffRoad(creep);
+      return;
+    }
+
     if (creep.memory.upgrading && creep.store[RESOURCE_ENERGY] == 0) {
       creep.memory.upgrading = false;
       creep.say("🔄 harvest");

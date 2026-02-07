@@ -25,9 +25,13 @@ const creepsModule = {
           roleHauler.run(creep);
         }
       } catch (e) {
-        console.log(
-          `[Creep] Error in ${creep.name} (${creep.memory.role}): ${e.stack}`,
-        );
+        // 防止日志刷屏，每 tick 每种角色只报错一次
+        if (!Memory._logFlood || Memory._logFlood !== Game.time) {
+          Memory._logFlood = Game.time;
+          console.log(
+            `[Creep] Error in ${creep.name} (${creep.memory.role}): ${e.stack}`,
+          );
+        }
       }
     }
   },

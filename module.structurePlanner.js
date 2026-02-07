@@ -92,14 +92,20 @@ const structurePlanner = {
       analysis.sources.forEach((source) => {
         this.planContainer(room, source.pos, 1, "SourceMining");
       });
+
+      // 规划 Extension (RCL >= 2)
+      this.planExtensions(room, analysis);
+
+      // 规划道路 (低频)
+      if (Game.time % 100 === 0) {
+        this.planRoads(room, analysis);
+      }
     }
 
-    // === 阶段 2: 中转仓网络 (RCL >= 3) ===
+    // === 阶段 2: 中转仓网络 & 塔 (RCL >= 3) ===
     if (rcl >= 3) {
       // 决策 1: Spawn 中转仓
-      // 如果 Spawn 位于中心，或者为了方便 Hauler 卸货，在 Spawn 附近必造一个
       if (analysis.isSpawnCentral) {
-        // 在 Spawn 周围 2 格内找最佳位置 (优先选靠近 CenterPos 的方向)
         this.planContainer(
           room,
           analysis.spawn.pos,
@@ -110,7 +116,6 @@ const structurePlanner = {
       }
 
       // 决策 2: Controller 接收仓
-      // 如果控制器偏远，必须造
       if (analysis.isControllerIsolated) {
         this.planContainer(
           room,
@@ -120,14 +125,383 @@ const structurePlanner = {
           analysis.spawn.pos,
         );
       }
+
+      // 决策 3: 防御塔
+      this.planTowers(room, analysis);
     }
 
-    // === 阶段 3: 二级中转点 (多级网络) ===
-    // 当资源点跨度过大 (>50) 时
-    if (analysis.maxSourceSpan > 50) {
-      // 在 Spawn 和最远 Source 的中间点规划二级中转 (简化逻辑)
-      // 暂不实现复杂寻路，仅标记
+    // === 阶段 3: 存储系统 (RCL >= 4) ===
+    if (rcl >= 4) {
+      this.planStorage(room, analysis);
     }
+
+    // === 阶段 4: 链路系统 (RCL >= 5) ===
+    if (rcl >= 5) {
+      this.planLinks(room, analysis);
+    }
+
+    // === 阶段 5: 矿产采集 (RCL >= 6) ===
+    if (rcl >= 6) {
+      this.planExtractor(room);
+    }
+  },
+
+  /**
+   * 规划 Extension (棋盘格布局)
+   * 根据 RCL 和 能量百分比 逐步建造
+   */
+  planExtensions: function (room, analysis) {
+    const rcl = room.controller.level;
+    const maxExtensions = CONTROLLER_STRUCTURES[STRUCTURE_EXTENSION][rcl] || 0;
+    if (maxExtensions === 0) return;
+
+    // 1. 统计现状
+    const existing = room.find(FIND_STRUCTURES, {
+      filter: (s) => s.structureType === STRUCTURE_EXTENSION,
+    });
+    const sites = room.find(FIND_MY_CONSTRUCTION_SITES, {
+      filter: (s) => s.structureType === STRUCTURE_EXTENSION,
+    });
+
+    const total = existing.length + sites.length;
+    if (total >= maxExtensions) return; // 已达上限
+
+    // 2. 逐步建造逻辑 (Gradual Build)
+    // 只有当当前工地很少，且能量充足时，才规划新的
+    // 防止一次性铺设太多工地导致能量被掏空
+    if (sites.length > 0) return; // 每次只规划一个，建完再规划下一个
+
+    // 能量阈值检查
+    // 用户要求：根据能量百分比逐渐新建
+    // 设定：能量 > 80% 容量时才允许扩建
+    // (在低等级时 80% 可能太难，设个保底值)
+    const energyRatio = room.energyAvailable / room.energyCapacityAvailable;
+    if (energyRatio < 0.8 && room.energyAvailable < 1000) return;
+
+    // 3. 寻找位置 (围绕 Spawn 的棋盘格)
+    // 棋盘格：(x + y) % 2 === 0 放 Extension，=== 1 放路/空地
+    const center = analysis.spawn.pos;
+    let bestPos = null;
+
+    // 从内圈向外圈扫描
+    // Range 2 (避开 Spawn 贴身) 到 10 (通常够了)
+    for (let r = 2; r <= 15; r++) {
+      for (let x = center.x - r; x <= center.x + r; x++) {
+        for (let y = center.y - r; y <= center.y + r; y++) {
+          // 只检查边缘的一圈 (Ring)
+          if (Math.abs(x - center.x) !== r && Math.abs(y - center.y) !== r)
+            continue;
+
+          // 边界检查
+          if (x < 2 || x > 47 || y < 2 || y > 47) continue;
+
+          // 棋盘格检查
+          if ((x + y) % 2 !== 0) continue;
+
+          // 地形检查
+          const terrain = room.getTerrain().get(x, y);
+          if (terrain === TERRAIN_MASK_WALL) continue;
+
+          const pos = new RoomPosition(x, y, room.name);
+
+          // 冲突检查 (建筑、工地、Source、Controller)
+          // 避开 Source 及其周围 1 格 (保留开采位)
+          if (pos.findInRange(FIND_SOURCES, 1).length > 0) continue;
+          // 避开 Controller 及其周围 2 格 (保留升级位)
+          if (pos.inRangeTo(room.controller, 2)) continue;
+
+          // 避开已有建筑/工地
+          const structures = pos.lookFor(LOOK_STRUCTURES);
+          if (structures.length > 0) continue; // 任何建筑都避开 (包括路，因为我们要造在空地上)
+
+          const existingSites = pos.lookFor(LOOK_CONSTRUCTION_SITES);
+          if (existingSites.length > 0) continue;
+
+          // 找到一个可用位置
+          bestPos = pos;
+          break;
+        }
+        if (bestPos) break;
+      }
+      if (bestPos) break;
+    }
+
+    // 4. 执行
+    if (bestPos) {
+      console.log(
+        `[Planner] 规划 Extension (${total + 1}/${maxExtensions}) @ ${bestPos.x},${bestPos.y} (Energy: ${(energyRatio * 100).toFixed(1)}%)`,
+      );
+      room.createConstructionSite(bestPos, STRUCTURE_EXTENSION);
+    }
+  },
+
+  /**
+   * 规划防御塔
+   */
+  planTowers: function (room, analysis) {
+    const rcl = room.controller.level;
+    const maxTowers = CONTROLLER_STRUCTURES[STRUCTURE_TOWER][rcl] || 0;
+    if (maxTowers === 0) return;
+
+    const existing = room.find(FIND_STRUCTURES, {
+      filter: (s) => s.structureType === STRUCTURE_TOWER,
+    });
+    const sites = room.find(FIND_MY_CONSTRUCTION_SITES, {
+      filter: (s) => s.structureType === STRUCTURE_TOWER,
+    });
+
+    if (existing.length + sites.length >= maxTowers) return;
+    if (sites.length > 0) return; // 每次规划一个
+
+    // 选址：Spawn 周围 3-5 格
+    // 塔应该分散一点，覆盖全图，但主要保护 Spawn
+    const center = analysis.spawn.pos;
+    let bestPos = null;
+
+    for (let r = 3; r <= 5; r++) {
+      for (let x = center.x - r; x <= center.x + r; x++) {
+        for (let y = center.y - r; y <= center.y + r; y++) {
+          if (Math.abs(x - center.x) !== r && Math.abs(y - center.y) !== r)
+            continue;
+          if (x < 2 || x > 47 || y < 2 || y > 47) continue;
+
+          const pos = new RoomPosition(x, y, room.name);
+          if (room.getTerrain().get(x, y) === TERRAIN_MASK_WALL) continue;
+
+          // 避开建筑和路
+          if (pos.lookFor(LOOK_STRUCTURES).length > 0) continue;
+          if (pos.lookFor(LOOK_CONSTRUCTION_SITES).length > 0) continue;
+
+          bestPos = pos;
+          break;
+        }
+        if (bestPos) break;
+      }
+      if (bestPos) break;
+    }
+
+    if (bestPos) {
+      console.log(`[Planner] 规划 Tower @ ${bestPos.x},${bestPos.y}`);
+      room.createConstructionSite(bestPos, STRUCTURE_TOWER);
+    }
+  },
+
+  /**
+   * 规划 Storage (中央仓库)
+   */
+  planStorage: function (room, analysis) {
+    if (
+      room.storage ||
+      room.find(FIND_MY_CONSTRUCTION_SITES, {
+        filter: (s) => s.structureType === STRUCTURE_STORAGE,
+      }).length > 0
+    )
+      return;
+
+    // 选址：优先选几何中心 (centerPos) 附近的空地
+    // 且最好靠近 Spawn (如果几何中心太远)
+    let targetPos = analysis.centerPos;
+    if (analysis.spawn.pos.getRangeTo(targetPos) > 15) {
+      // 如果中心太远，折中一下，取 Spawn 和 Source 中心的中点
+      const midX = Math.floor((analysis.spawn.pos.x + targetPos.x) / 2);
+      const midY = Math.floor((analysis.spawn.pos.y + targetPos.y) / 2);
+      targetPos = new RoomPosition(midX, midY, room.name);
+    }
+
+    const bestPos = this.findSpotNear(room, targetPos, 2);
+    if (bestPos) {
+      console.log(`[Planner] 规划 Storage @ ${bestPos.x},${bestPos.y}`);
+      room.createConstructionSite(bestPos, STRUCTURE_STORAGE);
+    }
+  },
+
+  /**
+   * 规划 Links (传送链路)
+   */
+  planLinks: function (room, analysis) {
+    const rcl = room.controller.level;
+    const maxLinks = CONTROLLER_STRUCTURES[STRUCTURE_LINK][rcl] || 0;
+    if (maxLinks === 0) return;
+
+    const existing = room.find(FIND_STRUCTURES, {
+      filter: (s) => s.structureType === STRUCTURE_LINK,
+    });
+    const sites = room.find(FIND_MY_CONSTRUCTION_SITES, {
+      filter: (s) => s.structureType === STRUCTURE_LINK,
+    });
+    if (existing.length + sites.length >= maxLinks) return;
+    if (sites.length > 0) return;
+
+    // 优先级 1: Storage Link (中央枢纽)
+    if (room.storage) {
+      const storageLink = room.storage.pos.findInRange(FIND_STRUCTURES, 2, {
+        filter: (s) => s.structureType === STRUCTURE_LINK,
+      })[0];
+      const storageSite = room.storage.pos.findInRange(
+        FIND_MY_CONSTRUCTION_SITES,
+        2,
+        { filter: (s) => s.structureType === STRUCTURE_LINK },
+      )[0];
+
+      if (!storageLink && !storageSite) {
+        const pos = this.findSpotNear(room, room.storage.pos, 2);
+        if (pos) {
+          room.createConstructionSite(pos, STRUCTURE_LINK);
+          return;
+        }
+      }
+    }
+
+    // 优先级 2: Controller Link (远程升级)
+    if (analysis.isControllerIsolated) {
+      const controllerLink = room.controller.pos.findInRange(
+        FIND_STRUCTURES,
+        3,
+        { filter: (s) => s.structureType === STRUCTURE_LINK },
+      )[0];
+      const controllerSite = room.controller.pos.findInRange(
+        FIND_MY_CONSTRUCTION_SITES,
+        3,
+        { filter: (s) => s.structureType === STRUCTURE_LINK },
+      )[0];
+
+      if (!controllerLink && !controllerSite) {
+        const pos = this.findSpotNear(room, room.controller.pos, 3);
+        if (pos) {
+          room.createConstructionSite(pos, STRUCTURE_LINK);
+          return;
+        }
+      }
+    }
+
+    // 优先级 3: Source Links (远程采集)
+    for (const source of analysis.sources) {
+      // 只有当 Source 离 Storage 较远 (>10) 时才配 Link
+      if (room.storage && source.pos.getRangeTo(room.storage) < 10) continue;
+
+      const sourceLink = source.pos.findInRange(FIND_STRUCTURES, 2, {
+        filter: (s) => s.structureType === STRUCTURE_LINK,
+      })[0];
+      const sourceSite = source.pos.findInRange(FIND_MY_CONSTRUCTION_SITES, 2, {
+        filter: (s) => s.structureType === STRUCTURE_LINK,
+      })[0];
+
+      if (!sourceLink && !sourceSite) {
+        const pos = this.findSpotNear(room, source.pos, 2);
+        if (pos) {
+          room.createConstructionSite(pos, STRUCTURE_LINK);
+          return;
+        }
+      }
+    }
+  },
+
+  /**
+   * 规划 Extractor (矿物采集)
+   */
+  planExtractor: function (room) {
+    const minerals = room.find(FIND_MINERALS);
+    if (minerals.length === 0) return;
+
+    const mineral = minerals[0];
+    const existing = mineral.pos
+      .lookFor(LOOK_STRUCTURES)
+      .find((s) => s.structureType === STRUCTURE_EXTRACTOR);
+    const site = mineral.pos
+      .lookFor(LOOK_CONSTRUCTION_SITES)
+      .find((s) => s.structureType === STRUCTURE_EXTRACTOR);
+
+    if (!existing && !site) {
+      room.createConstructionSite(mineral.pos, STRUCTURE_EXTRACTOR);
+    }
+  },
+
+  /**
+   * 规划道路 (Highways)
+   */
+  planRoads: function (room, analysis) {
+    // 1. Spawn -> Sources
+    analysis.sources.forEach((source) => {
+      const path = analysis.spawn.pos.findPathTo(source, {
+        ignoreCreeps: true,
+        swampCost: 2,
+      });
+      this.buildHighway(room, path);
+    });
+
+    // 2. Spawn -> Controller
+    const pathCtrl = analysis.spawn.pos.findPathTo(room.controller, {
+      ignoreCreeps: true,
+      swampCost: 2,
+    });
+    this.buildHighway(room, pathCtrl);
+
+    // 3. Spawn -> Storage (如果存在)
+    if (room.storage) {
+      const pathToStorage = analysis.spawn.pos.findPathTo(room.storage, {
+        ignoreCreeps: true,
+        swampCost: 2,
+      });
+      this.buildHighway(room, pathToStorage);
+    }
+  },
+
+  /**
+   * 辅助：构建道路 (支持简易双车道)
+   */
+  buildHighway: function (room, path) {
+    path.forEach((step, index) => {
+      const pos = new RoomPosition(step.x, step.y, room.name);
+      // 1. 主车道
+      if (room.getTerrain().get(step.x, step.y) !== TERRAIN_MASK_WALL) {
+        room.createConstructionSite(pos, STRUCTURE_ROAD);
+      }
+
+      // 2. 副车道 (可选：如果需要双车道)
+      // 简单逻辑：计算法线方向偏移
+      let nextStep = path[index + 1];
+      let dx = 0,
+        dy = 0;
+      if (nextStep) {
+        dx = nextStep.x - step.x;
+        dy = nextStep.y - step.y;
+      } else if (index > 0) {
+        let prevStep = path[index - 1];
+        dx = step.x - prevStep.x;
+        dy = step.y - prevStep.y;
+      }
+
+      if (dx !== 0 || dy !== 0) {
+        const sideX = step.x - dy;
+        const sideY = step.y + dx;
+        if (sideX > 1 && sideX < 48 && sideY > 1 && sideY < 48) {
+          if (room.getTerrain().get(sideX, sideY) !== TERRAIN_MASK_WALL) {
+            room.createConstructionSite(sideX, sideY, STRUCTURE_ROAD);
+          }
+        }
+      }
+    });
+  },
+
+  /**
+   * 辅助：在某位置附近找空位
+   */
+  findSpotNear: function (room, centerPos, range) {
+    for (let x = centerPos.x - range; x <= centerPos.x + range; x++) {
+      for (let y = centerPos.y - range; y <= centerPos.y + range; y++) {
+        if (x < 2 || x > 47 || y < 2 || y > 47) continue;
+        const pos = new RoomPosition(x, y, room.name);
+
+        if (room.getTerrain().get(x, y) === TERRAIN_MASK_WALL) continue;
+        if (pos.lookFor(LOOK_STRUCTURES).length > 0) continue;
+        if (pos.lookFor(LOOK_CONSTRUCTION_SITES).length > 0) continue;
+        if (pos.lookFor(LOOK_SOURCES).length > 0) continue;
+        if (pos.lookFor(LOOK_MINERALS).length > 0) continue;
+
+        return pos;
+      }
+    }
+    return null;
   },
 
   /**

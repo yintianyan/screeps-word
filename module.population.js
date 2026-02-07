@@ -47,11 +47,66 @@ const populationModule = {
     const allHaulers = Cache.getCreepsByRole(room, "hauler");
     const haulers = allHaulers.filter((c) => Lifecycle.isOperational(c));
 
-    if (haulers.length > 0) {
-      targets.harvester = sourceCount * 1;
-    } else {
-      targets.harvester = sourceCount;
-    }
+    // === 1. Harvester: 动态计算 ===
+    // 基础目标：每个 Source 1 个
+    // 危机模式 (Low Energy)：如果能量不足且 Creep 只有小体型，允许更多 Harvester 并行开采
+    let harvesterTarget = 0;
+
+    // 计算每个 Source 的可用空位 (cached)
+    sources.forEach((source) => {
+      const spots = Cache.getHeap(`spots_${source.id}`, () => {
+        let count = 0;
+        const terrain = room.getTerrain();
+        for (let x = -1; x <= 1; x++) {
+          for (let y = -1; y <= 1; y++) {
+            if (x === 0 && y === 0) continue;
+            if (
+              terrain.get(source.pos.x + x, source.pos.y + y) !==
+              TERRAIN_MASK_WALL
+            ) {
+              count++;
+            }
+          }
+        }
+        return count;
+      });
+
+      // 默认 1 个
+      let desired = 1;
+
+      // 危机检测：
+      // 1. 能量极低 (< 40% 容量)
+      // 2. 或者当前 Harvester 平均体型太小 (Work 部件少)
+      // 简单判断：如果 room capacity > 800 但 current available < 400，说明可能刚死了一批大的，只能造小的
+      // 我们允许填满所有空位，直到达到 source 上限 (3000/300 = 10 energy/tick = 5 WORK parts)
+      // 如果都是小 creep (2 WORK), 需要 3 个才能抵 1 个大的
+
+      const isEmergency =
+        room.energyAvailable < room.energyCapacityAvailable * 0.4 ||
+        room.energyAvailable < 400;
+
+      if (isEmergency) {
+        // 危机时刻，允许最大化开采 (但不超过空位数，也不超过 3 个)
+        desired = Math.min(spots, 3);
+        // 仅在 console 偶尔打印，避免刷屏
+        if (Game.time % 20 === 0 && desired > 1) {
+          console.log(
+            `[Population] 🚨 能源危机 (Available: ${room.energyAvailable}) - Source ${source.id} 启用多采集者模式 (Target: ${desired})`,
+          );
+        }
+      } else {
+        // 正常时刻，检查是否需要 2 个 (针对 RCL 低但有多个空位的情况)
+        // 如果 RCL < 3 (Capacity < 800)，单个 Creep 做不到 5 WORK + 1 CARRY + MOVE
+        // 此时允许 2 个
+        if (room.energyCapacityAvailable < 550 && spots >= 2) {
+          desired = 2;
+        }
+      }
+
+      harvesterTarget += desired;
+    });
+
+    targets.harvester = harvesterTarget;
 
     // 2. Hauler:
     const haulerNeeds = this.getHaulerNeeds(room);
@@ -104,44 +159,87 @@ const populationModule = {
       storedPercentage = containerBacklog / containerCapacity;
     }
 
-    targets.builder = 0;
+    // === 状态机管理 (State Machine: Crisis Control) ===
+    // 目标：进入能源危机后，停止所有消耗性能源的工作，直到恢复到一定阈值
+    if (!room.memory.energyState) room.memory.energyState = "NORMAL";
 
-    // === 3. Builder Regulation ===
-    // 只有当存储能量 > 70% 时，才允许进行大规模建造
-    // 例外：关键设施 (Spawn/Extension/Tower) 即使低能量也允许少量建造
-    if (criticalSites.length > 0) {
-      targets.builder = 2; // 关键设施优先
-    } else if (sites.length > 0) {
-      if (storedPercentage > 0.7) {
-        // 能源充足，全力建造
-        targets.builder = 3;
-      } else if (storedPercentage > 0.4) {
-        // 能源一般，维持最低建造 (1个)
-        targets.builder = 1;
-      } else {
-        // 能源不足 (< 40%)，停止建造，专注挖矿
-        targets.builder = 0;
+    // 阈值设定 (20% 进入危机, 40% 恢复)
+    const CRISIS_THRESHOLD = 0.2;
+    const RECOVERY_THRESHOLD = 0.4;
+
+    if (room.memory.energyState === "NORMAL") {
+      if (storedPercentage < CRISIS_THRESHOLD) {
+        room.memory.energyState = "CRISIS";
+        console.log(
+          `[Population] ⚠️ 能源告急！进入危机模式 (Storage: ${(storedPercentage * 100).toFixed(1)}%) - 停止升级与建筑`,
+        );
+      }
+    } else if (room.memory.energyState === "CRISIS") {
+      if (storedPercentage > RECOVERY_THRESHOLD) {
+        room.memory.energyState = "NORMAL";
+        console.log(
+          `[Population] ✅ 能源恢复！解除危机模式 (Storage: ${(storedPercentage * 100).toFixed(1)}%) - 恢复生产`,
+        );
       }
     }
 
-    // === 4. Upgrader Regulation ===
-    // 根据存储比例调节 Upgrader 数量
-    if (storedPercentage > 0.8) {
-      targets.upgrader = 3; // 能源过剩，全力升级
-    } else if (storedPercentage > 0.5) {
-      targets.upgrader = 2; // 能源健康，适度升级
-    } else {
-      targets.upgrader = 1; // 能源紧缺，仅维持 Controller
-    }
+    const isCrisis = room.memory.energyState === "CRISIS";
 
-    // 额外逻辑：如果 Container 爆仓 (Storage 没建好时)，也允许升级
-    if (storageCapacity === 0 && containerBacklog > containerCapacity * 0.8) {
-      targets.upgrader = 2;
-    }
+    targets.builder = 0;
 
-    if (room.controller && room.controller.ticksToDowngrade < 4000) {
-      targets.upgrader = this.config.limits.upgrader;
+    if (isCrisis) {
+      // === 危机模式 ===
+      // 停止一切非必要消耗
       targets.builder = 0;
+      targets.upgrader = 0;
+
+      // 唯一的例外：Controller 即将降级 ( < 4000 ticks )
+      if (room.controller && room.controller.ticksToDowngrade < 4000) {
+        console.log(
+          `[Population] 🚨 紧急：Controller 即将降级，强制维持 Upgrader`,
+        );
+        targets.upgrader = 1;
+      }
+    } else {
+      // === 正常模式 (NORMAL) ===
+
+      // === 3. Builder Regulation ===
+      // 只有当存储能量 > 70% 时，才允许进行大规模建造
+      // 例外：关键设施 (Spawn/Extension/Tower) 即使低能量也允许少量建造
+      if (criticalSites.length > 0) {
+        targets.builder = 2; // 关键设施优先
+      } else if (sites.length > 0) {
+        if (storedPercentage > 0.5) {
+          // 能源充足 (>50%)，全力建造
+          targets.builder = 3;
+        } else if (storedPercentage > 0.2) {
+          // 能源一般 (>20%)，维持最低建造 (1个)
+          targets.builder = 1;
+        } else {
+          // 能源不足 (< 20%)，停止建造，专注挖矿
+          targets.builder = 0;
+        }
+      }
+
+      // === 4. Upgrader Regulation ===
+      // 根据存储比例调节 Upgrader 数量
+      if (storedPercentage > 0.8) {
+        targets.upgrader = 3; // 能源过剩，全力升级
+      } else if (storedPercentage > 0.5) {
+        targets.upgrader = 2; // 能源健康，适度升级
+      } else {
+        targets.upgrader = 1; // 能源紧缺，仅维持 Controller
+      }
+
+      // 额外逻辑：如果 Container 爆仓 (Storage 没建好时)，也允许升级
+      if (storageCapacity === 0 && containerBacklog > containerCapacity * 0.8) {
+        targets.upgrader = 2;
+      }
+
+      if (room.controller && room.controller.ticksToDowngrade < 4000) {
+        targets.upgrader = this.config.limits.upgrader;
+        targets.builder = 0;
+      }
     }
 
     targets.builder = Math.min(targets.builder, this.config.limits.builder);

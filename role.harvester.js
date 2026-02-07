@@ -43,7 +43,11 @@ const roleHarvester = {
       filter: (c) => c.memory.role === "hauler",
     });
 
-    if (haulers.length > 0) {
+    // 危机检测：能量极低 (< 300)
+    // 如果能量不足以孵化基础 Creep，Harvester 必须兼职搬运，无论有没有 Hauler
+    const isEmergency = creep.room.energyAvailable < 300;
+
+    if (haulers.length > 0 && !isEmergency) {
       // === 静态挖掘模式 (Static Mining) ===
       // 目标：始终待在 Source/Container 旁边，不停地 harvest()
       // 即使背包满了，harvest() 也会导致能量掉落在地上或进入 Container
