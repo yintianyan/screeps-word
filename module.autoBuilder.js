@@ -121,6 +121,25 @@ const autoBuilder = {
                         room.createConstructionSite(targetX, targetY, STRUCTURE_CONTAINER);
                     }
                 }
+
+                // 4.3 清理多余的 Container 工地
+                // 如果 Source 附近已经有 Container 了，就移除该 Source 附近所有的 Container 工地，防止重复建造
+                sources.forEach(source => {
+                    const nearbyContainers = source.pos.findInRange(FIND_STRUCTURES, 2, {
+                        filter: s => s.structureType === STRUCTURE_CONTAINER
+                    });
+                    
+                    if (nearbyContainers.length > 0) {
+                        const nearbySites = source.pos.findInRange(FIND_MY_CONSTRUCTION_SITES, 2, {
+                            filter: s => s.structureType === STRUCTURE_CONTAINER
+                        });
+                        
+                        nearbySites.forEach(site => {
+                            console.log(`清理多余的 Container 工地: ${site.pos}`);
+                            site.remove();
+                        });
+                    }
+                });
             }
         }
 
@@ -184,124 +203,13 @@ const autoBuilder = {
                             const result = room.createConstructionSite(x, y, STRUCTURE_EXTENSION);
                             if (result === OK) {
                                 currentCount++;
-                                if (currentCount >= maxExtensions) return; // 达到上限停止
+                                if (currentCount >= maxExtensions) break; // 达到上限停止
                             }
                         }
                     }
+                    if (currentCount >= maxExtensions) break;
                 }
-            }
-        }
-        // 4. 自动建造 Container (在 Source 旁边)
-        // 只有 RCL >= 2 才能造 Container
-        if (currentRCL >= 2) {
-            sources.forEach(source => {
-                // 检查 Source 周围 1 格内是否已有 Container 或工地
-                const nearby = source.pos.findInRange(FIND_STRUCTURES, 1, {
-                    filter: s => s.structureType === STRUCTURE_CONTAINER
-                });
-                const nearbySites = source.pos.findInRange(FIND_MY_CONSTRUCTION_SITES, 1, {
-                    filter: s => s.structureType === STRUCTURE_CONTAINER
-                });
-
-                if (nearby.length === 0 && nearbySites.length === 0) {
-                    // 智能选择最佳位置
-                    let bestPos = null;
-                    let bestScore = -9999;
-
-                    // 遍历 Source 周围 8 个格子
-                    for (let x = -1; x <= 1; x++) {
-                        for (let y = -1; y <= 1; y++) {
-                            if (x === 0 && y === 0) continue;
-                            
-                            const posX = source.pos.x + x;
-                            const posY = source.pos.y + y;
-                            
-                            // 检查地形
-                            const terrain = room.getTerrain().get(posX, posY);
-                            if (terrain === TERRAIN_MASK_WALL) continue;
-
-                            const pos = new RoomPosition(posX, posY, room.name);
-                            
-                            // 评分标准：
-                            // 1. 距离 Spawn 近 (权重高)
-                            // 2. 是平原 (Plain) 而不是沼泽 (Swamp)
-                            // 3. 周围空地多 (方便 Hauler 进出)
-                            
-                            let score = 0;
-                            
-                            // 距离分 (越近越好，取负数)
-                            const path = pos.findPathTo(spawn, {ignoreCreeps: true, range: 1});
-                            if (path.length === 0) continue; // 不可达
-                            score -= path.length * 2;
-
-                            // 地形分
-                            if (terrain === 0) score += 5; // Plain
-                            if (terrain === TERRAIN_MASK_SWAMP) score -= 5; // Swamp
-
-                            // 可达性分 (周围有多少个非墙格子)
-                            let openNeighbors = 0;
-                            for (let dx = -1; dx <= 1; dx++) {
-                                for (let dy = -1; dy <= 1; dy++) {
-                                    if (dx === 0 && dy === 0) continue;
-                                    if (room.getTerrain().get(posX + dx, posY + dy) !== TERRAIN_MASK_WALL) {
-                                        openNeighbors++;
-                                    }
-                                }
-                            }
-                            score += openNeighbors;
-
-                            if (score > bestScore) {
-                                bestScore = score;
-                                bestPos = pos;
-                            }
-                        }
-                    }
-
-                    if (bestPos) {
-                        room.createConstructionSite(bestPos.x, bestPos.y, STRUCTURE_CONTAINER);
-                    }
-                }
-            });
-
-            // 4.1 自动建造 Controller Container (用于升级)
-            // 只有当 Controller 等级足够高时才需要 (比如 RCL 2)
-            if (room.controller) {
-                const nearby = room.controller.pos.findInRange(FIND_STRUCTURES, 3, {
-                    filter: s => s.structureType === STRUCTURE_CONTAINER
-                });
-                const nearbySites = room.controller.pos.findInRange(FIND_MY_CONSTRUCTION_SITES, 3, {
-                    filter: s => s.structureType === STRUCTURE_CONTAINER
-                });
-
-                if (nearby.length === 0 && nearbySites.length === 0) {
-                    // 找到通往 Controller 的路径，在距离 2-3 格的位置放 Container
-                    // 这样 Upgrader 可以站在 Container 上或旁边升级
-                    const path = spawn.pos.findPathTo(room.controller, {ignoreCreeps: true, range: 2});
-                    if (path.length > 0) {
-                        const containerPos = path[path.length - 1];
-                        room.createConstructionSite(containerPos.x, containerPos.y, STRUCTURE_CONTAINER);
-                    }
-                }
-            }
-
-            // 4.2 自动建造 General Container (Spawn 附近，作为中转站)
-            // 在 Spawn 附近 Range 2 的位置
-            const spawnNearby = spawn.pos.findInRange(FIND_STRUCTURES, 2, {
-                filter: s => s.structureType === STRUCTURE_CONTAINER
-            });
-            const spawnNearbySites = spawn.pos.findInRange(FIND_MY_CONSTRUCTION_SITES, 2, {
-                filter: s => s.structureType === STRUCTURE_CONTAINER
-            });
-            
-            if (spawnNearby.length === 0 && spawnNearbySites.length === 0) {
-                // 简单的找个空地
-                const targetX = spawn.pos.x;
-                const targetY = spawn.pos.y + 2; // 下方两格
-                // 检查地形
-                const terrain = room.getTerrain().get(targetX, targetY);
-                if (terrain !== TERRAIN_MASK_WALL) {
-                    room.createConstructionSite(targetX, targetY, STRUCTURE_CONTAINER);
-                }
+                if (currentCount >= maxExtensions) break;
             }
         }
 
