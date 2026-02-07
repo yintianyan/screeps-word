@@ -137,6 +137,24 @@ const roleBuilder = {
         return;
       }
 
+      // 3.5 紧急/便利取能：如果在 Spawn/Extension 附近 (Range 5)，且有能量，允许取用
+      // 这避免了在基地附近建设时傻等 Hauler
+      const nearbySpawnOrExt = creep.pos.findInRange(FIND_STRUCTURES, 5, {
+        filter: (s) =>
+          (s.structureType === STRUCTURE_SPAWN || s.structureType === STRUCTURE_EXTENSION) &&
+          s.store[RESOURCE_ENERGY] > 0
+      })[0];
+      
+      if (nearbySpawnOrExt) {
+          delete creep.memory.requestingEnergy;
+          delete creep.memory.waitingTicks;
+          
+          if (creep.withdraw(nearbySpawnOrExt, RESOURCE_ENERGY) == ERR_NOT_IN_RANGE) {
+              moveModule.smartMove(creep, nearbySpawnOrExt, { visualizePathStyle: { stroke: "#ffaa00" } });
+          }
+          return;
+      }
+
       // 4. 如果都找不到，请求喂养
       // 激活请求协议
       creep.memory.requestingEnergy = true;
