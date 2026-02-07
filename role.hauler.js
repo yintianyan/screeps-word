@@ -25,8 +25,24 @@ const roleHauler = {
 
     if (creep.memory.hauling) {
       // === 送货模式 ===
-      // 目标锁定逻辑：一旦选定目标，就存入 memory.targetId，直到送完或者目标无效
 
+      // 0. 预判逻辑：统计所有其他搬运工的送货目标和携带量
+      // 用于防止多个搬运工同时前往同一个只需少量能量的目标
+      const incomingEnergy = {};
+      const otherHaulers = creep.room.find(FIND_MY_CREEPS, {
+        filter: (c) =>
+          c.memory.role === "hauler" &&
+          c.memory.hauling &&
+          c.id !== creep.id &&
+          c.memory.targetId,
+      });
+
+      otherHaulers.forEach((h) => {
+        incomingEnergy[h.memory.targetId] =
+          (incomingEnergy[h.memory.targetId] || 0) + h.store[RESOURCE_ENERGY];
+      });
+
+      // 目标锁定逻辑：一旦选定目标，就存入 memory.targetId，直到送完或者目标无效
       let target = null;
 
       // 1. 尝试从 memory 获取已锁定的目标
@@ -36,19 +52,22 @@ const roleHauler = {
         // 验证目标是否有效
         let isValid = false;
         if (target) {
-          // 如果是建筑
-          if (target.store) {
-            // 只要还有空间就视为有效，哪怕只能放 1 点能量
-            // 注意：如果目标是 Spawn/Extension，我们希望尽量填满
-            if (target.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
-              isValid = true;
-            }
-          }
-          // 如果是 Creep (Upgrader/Builder)
-          else if (target.store) {
-            // Creep 也有 store
-            if (target.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
-              isValid = true;
+          const freeCapacity = target.store
+            ? target.store.getFreeCapacity(RESOURCE_ENERGY)
+            : 0;
+
+          // 基本有效性检查：必须还有空位
+          if (freeCapacity > 0) {
+            isValid = true;
+
+            // 进阶检查：是否被其他人填满？
+            // 如果 (其他人正在运送的量) >= (目标剩余空间)，则认为目标已饱和，我应该放弃
+            const othersIncoming = incomingEnergy[target.id] || 0;
+            if (othersIncoming >= freeCapacity) {
+              console.log(
+                `[Hauler] ${creep.name} switching from ${target.structureType || "target"} #${target.id}: Saturated by others (Incoming: ${othersIncoming} >= Free: ${freeCapacity})`,
+              );
+              isValid = false; // 标记为无效，触发重新寻找
             }
           }
         }
@@ -63,13 +82,23 @@ const roleHauler = {
       if (!target) {
         let targets = [];
 
+        // 辅助函数：过滤掉已饱和的目标
+        const filterSaturated = (structure) => {
+          const free = structure.store.getFreeCapacity(RESOURCE_ENERGY);
+          if (free <= 0) return false;
+
+          const incoming = incomingEnergy[structure.id] || 0;
+          // 如果 (已有运送量) >= (剩余容量)，则跳过
+          return incoming < free;
+        };
+
         // 优先级 1: Spawn / Extension
         targets = creep.room.find(FIND_STRUCTURES, {
           filter: (structure) => {
             return (
               (structure.structureType == STRUCTURE_EXTENSION ||
                 structure.structureType == STRUCTURE_SPAWN) &&
-              structure.store.getFreeCapacity(RESOURCE_ENERGY) > 0
+              filterSaturated(structure)
             );
           },
         });
@@ -80,7 +109,7 @@ const roleHauler = {
             filter: (structure) => {
               return (
                 structure.structureType == STRUCTURE_TOWER &&
-                structure.store.getFreeCapacity(RESOURCE_ENERGY) > 0
+                filterSaturated(structure)
               );
             },
           });
@@ -90,8 +119,8 @@ const roleHauler = {
         if (targets.length === 0) {
           const hungryCreeps = creep.room.find(FIND_MY_CREEPS, {
             filter: (c) => {
-              // 只要请求标志为 true
-              return c.memory.requestingEnergy;
+              // 只要请求标志为 true，且未被满足
+              return c.memory.requestingEnergy && filterSaturated(c);
             },
           });
 
@@ -126,8 +155,7 @@ const roleHauler = {
           if (spawn) {
             const spawnContainers = spawn.pos.findInRange(FIND_STRUCTURES, 3, {
               filter: (s) =>
-                s.structureType === STRUCTURE_CONTAINER &&
-                s.store.getFreeCapacity(RESOURCE_ENERGY) > 0,
+                s.structureType === STRUCTURE_CONTAINER && filterSaturated(s),
             });
             if (spawnContainers.length > 0) {
               targets = spawnContainers;
@@ -141,7 +169,7 @@ const roleHauler = {
             filter: (structure) => {
               return (
                 structure.structureType == STRUCTURE_STORAGE &&
-                structure.store.getFreeCapacity(RESOURCE_ENERGY) > 0
+                filterSaturated(structure)
               );
             },
           });
@@ -151,8 +179,7 @@ const roleHauler = {
         if (targets.length === 0 && creep.room.controller) {
           targets = creep.room.controller.pos.findInRange(FIND_STRUCTURES, 4, {
             filter: (s) =>
-              s.structureType === STRUCTURE_CONTAINER &&
-              s.store.getFreeCapacity(RESOURCE_ENERGY) > 0,
+              s.structureType === STRUCTURE_CONTAINER && filterSaturated(s),
           });
         }
 
