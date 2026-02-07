@@ -221,6 +221,31 @@ const roleHauler = {
         }
 
         // 优先级 4: Storage
+        // 策略：Storage 是主要蓄水池，优先级较高。但如果 Controller Container 极度缺货，应优先送往那里。
+
+        // 检查 Controller Container 状态
+        let controllerContainer = null;
+        if (creep.room.controller) {
+          const containers = creep.room.controller.pos.findInRange(
+            FIND_STRUCTURES,
+            4,
+            {
+              filter: (s) =>
+                s.structureType === STRUCTURE_CONTAINER && filterSaturated(s),
+            },
+          );
+          if (containers.length > 0) controllerContainer = containers[0];
+        }
+
+        // 如果 Controller Container 很空 (< 500)，强行提升优先级到 Storage 之前
+        if (
+          targets.length === 0 &&
+          controllerContainer &&
+          controllerContainer.store[RESOURCE_ENERGY] < 500
+        ) {
+          targets = [controllerContainer];
+        }
+
         if (targets.length === 0) {
           targets = creep.room.find(FIND_STRUCTURES, {
             filter: (structure) => {
@@ -232,12 +257,9 @@ const roleHauler = {
           });
         }
 
-        // 优先级 5: Controller Container
-        if (targets.length === 0 && creep.room.controller) {
-          targets = creep.room.controller.pos.findInRange(FIND_STRUCTURES, 4, {
-            filter: (s) =>
-              s.structureType === STRUCTURE_CONTAINER && filterSaturated(s),
-          });
+        // 优先级 5: Controller Container (常规补充)
+        if (targets.length === 0 && controllerContainer) {
+          targets = [controllerContainer];
         }
 
         // 选择最近的目标并锁定
@@ -326,9 +348,66 @@ const roleHauler = {
       // 0. 优先从 Mining Container 取货 (如果有能量)
       // 必须是 Source 附近的 Container，或者是 Spawn 附近的 Container (如果是空的 Spawn 需要补充？暂时不考虑)
 
-      // 如果分配了 Source ID，优先去该 Source 附近的 Container
+      // === 动态负载均衡 (Dynamic Load Balancing) ===
+      // 不再盲目去绑定的 Source，而是先扫描全图，看有没有 "爆仓" 的 Container
+      // 只有当没有紧急情况时，才优先去自己的 Source
+
       let targetContainer = null;
-      if (creep.memory.sourceId) {
+      const allMiningContainers = creep.room.find(FIND_STRUCTURES, {
+        filter: (s) =>
+          s.structureType === STRUCTURE_CONTAINER &&
+          s.pos.findInRange(FIND_SOURCES, 2).length > 0,
+      });
+
+      if (allMiningContainers.length > 0) {
+        let bestContainer = null;
+        let maxScore = -Infinity;
+
+        allMiningContainers.forEach((c) => {
+          const energy = c.store[RESOURCE_ENERGY];
+          if (energy < 100) return; // 忽略几乎空的
+
+          let score = energy;
+
+          // 距离惩罚 (每格 -10 分，避免为了多 100 能量跑半个地图)
+          const dist = creep.pos.getRangeTo(c);
+          score -= dist * 10;
+
+          // 绑定奖励 (Source Affinity)
+          // 如果是分配给我的 Source，奖励 800 分 (相当于 800 能量的优势)
+          if (
+            creep.memory.sourceId &&
+            c.pos
+              .findInRange(FIND_SOURCES, 2)
+              .some((s) => s.id === creep.memory.sourceId)
+          ) {
+            score += 800;
+          }
+
+          // 爆仓奖励 (Emergency Overflow)
+          // 如果能量 > 1800 (即将满)，奖励 2000 分 (无视距离和绑定，强制去搬)
+          if (energy > 1800) {
+            score += 2000;
+          } else if (energy > 1500) {
+            score += 1000;
+          }
+
+          if (score > maxScore) {
+            maxScore = score;
+            bestContainer = c;
+          }
+        });
+
+        if (bestContainer) {
+          targetContainer = bestContainer;
+        }
+      }
+
+      // 如果通过评分系统没找到（比如都空了），再回退到旧逻辑（找自己的或者任意的）
+      // 其实上面的逻辑已经覆盖了找自己的，所以这里只需要处理还没找到的情况
+
+      // 如果分配了 Source ID，优先去该 Source 附近的 Container
+      if (!targetContainer && creep.memory.sourceId) {
         const source = Game.getObjectById(creep.memory.sourceId);
         if (source) {
           const containers = source.pos.findInRange(FIND_STRUCTURES, 2, {
