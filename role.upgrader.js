@@ -17,19 +17,49 @@ const roleUpgrader = {
       delete creep.memory.requestingEnergy;
       delete creep.memory.waitingTicks;
 
-      if (creep.upgradeController(creep.room.controller) == ERR_NOT_IN_RANGE) {
-        moveModule.smartMove(creep, creep.room.controller, {
-          visualizePathStyle: { stroke: "#ffffff" },
-        });
+      // === 能量区间控制 (Energy Interval Control) ===
+      // 只有当 Storage 能量充足时，才允许全力升级
+      // 否则应该节约能量 (例如每 5 ticks 升级一次？或者只修不升？)
+      // 但为了防止降级，我们至少保证最低限度的运作。
+      // 此处主要依赖 Population 模块控制数量，但已存在的 Upgrader 也可以自我节制。
+
+      let shouldUpgrade = true;
+      if (creep.room.storage) {
+        const storedPct =
+          creep.room.storage.store[RESOURCE_ENERGY] /
+          creep.room.storage.store.getCapacity(RESOURCE_ENERGY);
+        if (storedPct < 0.3 && creep.room.controller.ticksToDowngrade > 4000) {
+          // 极低能量且无降级风险：降低工作频率 (例如 50% 概率摸鱼)
+          // 或者更直接：如果 bucket 低，或者单纯为了省能量
+          if (Game.time % 2 !== 0) shouldUpgrade = false;
+          creep.say("📉 saving");
+        }
+      }
+
+      if (shouldUpgrade) {
+        if (
+          creep.upgradeController(creep.room.controller) == ERR_NOT_IN_RANGE
+        ) {
+          moveModule.smartMove(creep, creep.room.controller, {
+            visualizePathStyle: { stroke: "#ffffff" },
+          });
+        }
       }
     } else {
       // 1. 寻找最近的 Container 或 Storage
       // 优先从 Container/Storage 取货，不再死守 Controller 旁边，而是就近提取
+
+      // === 能量区间控制 (Energy Interval Control) ===
+      // 如果能量 < 30%，只允许从 Storage 取非常少量的能量 (或者只捡垃圾)
+      // 但为了简单，我们限制它只在 Container/Storage 比较富裕时才取
+
       const target = creep.pos.findClosestByPath(FIND_STRUCTURES, {
         filter: (s) =>
           (s.structureType === STRUCTURE_CONTAINER ||
             s.structureType === STRUCTURE_STORAGE) &&
-          s.store[RESOURCE_ENERGY] > 0,
+          s.store[RESOURCE_ENERGY] > 0 &&
+          // 新增限制：如果该容器能量过低 (<300)，且房间整体缺能，就不要去抢搬运工的货了
+          (s.store[RESOURCE_ENERGY] > 300 || creep.room.energyAvailable > 500),
       });
 
       if (target) {

@@ -86,39 +86,57 @@ const populationModule = {
     const storageEnergy = room.storage
       ? room.storage.store[RESOURCE_ENERGY]
       : 0;
+    const storageCapacity = room.storage
+      ? room.storage.store.getCapacity(RESOURCE_ENERGY)
+      : 0;
 
     // Use Cache for containers
     const containers = Cache.getStructures(room, STRUCTURE_CONTAINER);
     let containerBacklog = 0;
     containers.forEach((c) => (containerBacklog += c.store[RESOURCE_ENERGY]));
+    const containerCapacity = containers.length * 2000;
+
+    // 计算总存储比例 (Storage Percentage)
+    let storedPercentage = 0;
+    if (storageCapacity > 0) {
+      storedPercentage = storageEnergy / storageCapacity;
+    } else if (containerCapacity > 0) {
+      storedPercentage = containerBacklog / containerCapacity;
+    }
 
     targets.builder = 0;
 
+    // === 3. Builder Regulation ===
+    // 只有当存储能量 > 70% 时，才允许进行大规模建造
+    // 例外：关键设施 (Spawn/Extension/Tower) 即使低能量也允许少量建造
     if (criticalSites.length > 0) {
-      targets.builder = 2;
-      targets.upgrader = 1;
+      targets.builder = 2; // 关键设施优先
     } else if (sites.length > 0) {
-      targets.builder = 1;
-      if (storageEnergy > 50000 || containerBacklog > 5000) {
-        targets.upgrader = 2;
+      if (storedPercentage > 0.7) {
+        // 能源充足，全力建造
+        targets.builder = 3;
+      } else if (storedPercentage > 0.4) {
+        // 能源一般，维持最低建造 (1个)
+        targets.builder = 1;
       } else {
-        targets.upgrader = 1;
+        // 能源不足 (< 40%)，停止建造，专注挖矿
+        targets.builder = 0;
       }
-    } else {
-      targets.builder = 0;
-      targets.upgrader = 1;
-      if (storageEnergy > 100000) {
-        targets.upgrader = 3;
-      } else if (storageEnergy > 20000 || containerBacklog > 4000) {
-        targets.upgrader = 2;
-      }
+    }
 
-      const fullContainers = containers.filter(
-        (c) => c.store[RESOURCE_ENERGY] > 1800,
-      );
-      if (fullContainers.length >= 2 && energyRatio > 0.9) {
-        targets.upgrader = Math.max(targets.upgrader, 3);
-      }
+    // === 4. Upgrader Regulation ===
+    // 根据存储比例调节 Upgrader 数量
+    if (storedPercentage > 0.8) {
+      targets.upgrader = 3; // 能源过剩，全力升级
+    } else if (storedPercentage > 0.5) {
+      targets.upgrader = 2; // 能源健康，适度升级
+    } else {
+      targets.upgrader = 1; // 能源紧缺，仅维持 Controller
+    }
+
+    // 额外逻辑：如果 Container 爆仓 (Storage 没建好时)，也允许升级
+    if (storageCapacity === 0 && containerBacklog > containerCapacity * 0.8) {
+      targets.upgrader = 2;
     }
 
     if (room.controller && room.controller.ticksToDowngrade < 4000) {

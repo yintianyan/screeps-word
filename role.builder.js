@@ -57,10 +57,42 @@ const roleBuilder = {
       }
 
       // === 2. 建造任务 (Construction) ===
+      // 只有当 Room Storage/Container 能量 > 70% 时才允许建造 (除非是关键设施)
+      // 计算能量比例
+      let storedPercentage = 0;
+      if (creep.room.storage) {
+        storedPercentage =
+          creep.room.storage.store[RESOURCE_ENERGY] /
+          creep.room.storage.store.getCapacity(RESOURCE_ENERGY);
+      } else {
+        // Fallback to containers if no storage
+        const containers = creep.room.find(FIND_STRUCTURES, {
+          filter: (s) => s.structureType === STRUCTURE_CONTAINER,
+        });
+        const totalEnergy = containers.reduce(
+          (sum, c) => sum + c.store[RESOURCE_ENERGY],
+          0,
+        );
+        const totalCapacity = containers.length * 2000;
+        if (totalCapacity > 0) storedPercentage = totalEnergy / totalCapacity;
+      }
+
       const targets = creep.room.find(FIND_CONSTRUCTION_SITES);
-      if (targets.length) {
+
+      // 过滤出关键设施
+      const criticalSites = targets.filter(
+        (s) =>
+          s.structureType === STRUCTURE_SPAWN ||
+          s.structureType === STRUCTURE_EXTENSION ||
+          s.structureType === STRUCTURE_TOWER ||
+          s.structureType === STRUCTURE_CONTAINER,
+      );
+
+      // 如果有关键设施，或者能量充足，才进行建造
+      if (criticalSites.length > 0 || storedPercentage > 0.7) {
+        const buildTargets = criticalSites.length > 0 ? criticalSites : targets;
         // 使用 priorityModule 获取最佳目标
-        const target = priorityModule.getBestTarget(targets, creep.pos);
+        const target = priorityModule.getBestTarget(buildTargets, creep.pos);
 
         if (target) {
           creep.say("🔨 build");
@@ -70,8 +102,12 @@ const roleBuilder = {
               visualizePathStyle: { stroke: "#ffffff" },
             });
           }
+          return; // 有工地就造，不进行后续的“闲时维修”
         }
-        return; // 有工地就造，不进行后续的“闲时维修”
+      } else if (targets.length > 0) {
+        // 有工地但能量不足，Builder 应该做什么？
+        // 暂时转为维修或者搬运 (这里选择跳过建造，进入闲时维修逻辑)
+        creep.say("🚫 low nrg");
       }
 
       // === 3. 闲时维修 (Maintenance Repair) ===
