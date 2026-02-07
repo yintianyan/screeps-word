@@ -320,9 +320,25 @@ const roleHauler = {
         if (!redirected) {
           const result = creep.transfer(target, RESOURCE_ENERGY);
           if (result == ERR_NOT_IN_RANGE) {
-            moveModule.smartMove(creep, target, {
+            const moveOpts = {
               visualizePathStyle: { stroke: "#ffffff" },
-            });
+            };
+
+            // === 智能避让升级者 (Anti-Crowd Logic) ===
+            // 当去往 Controller 区域 (Range 5) 时，如果检测到堵塞 (stuckCount > 0)
+            // 自动启用避让模式，绕过 Upgrader，寻找侧边路径
+            if (
+              creep.room.controller &&
+              target.pos.inRangeTo(creep.room.controller, 5)
+            ) {
+              if (creep.memory._move && creep.memory._move.stuckCount > 0) {
+                moveOpts.avoidRoles = ["upgrader"];
+                moveOpts.visualizePathStyle.stroke = "#ff00ff"; // Purple path
+                creep.say("⤵️ bypass");
+              }
+            }
+
+            moveModule.smartMove(creep, target, moveOpts);
           } else if (result == ERR_FULL) {
             // 如果返回 ERR_FULL (虽然上面预判了，但多加一层保险)
             // 清除目标，让下一 tick 重新寻找

@@ -3,12 +3,20 @@
  * Executes tests against the modules
  */
 
-const { MockRoom, MockCreep, MockStructure, setupGlobal } = require("./mocks");
+const {
+  MockRoom,
+  MockCreep,
+  MockStructure,
+  MockRoomPosition,
+  setupGlobal,
+} = require("./mocks");
 setupGlobal();
 
+// Modules
 const populationModule = require("../module.population");
 const Cache = require("../core.cache");
 const Lifecycle = require("../module.lifecycle");
+const TrafficManager = require("../module.traffic");
 
 function assert(condition, message) {
   if (!condition) {
@@ -32,7 +40,36 @@ function runTests() {
   // Test 4: Lifecycle Logic
   testLifecycle();
 
+  // Test 5: Path Avoidance Logic
+  testPathAvoidance();
+
   console.log("\nAll Tests Passed!");
+}
+
+function testPathAvoidance() {
+  console.log("\n[Test] Path Avoidance Logic");
+  const room = new MockRoom("E1N1");
+  const hauler = new MockCreep("hauler1", "hauler", room);
+  const upgrader = new MockCreep("upgrader1", "upgrader", room);
+
+  hauler.pos = new MockRoomPosition(10, 10, "E1N1");
+  upgrader.pos = new MockRoomPosition(11, 10, "E1N1");
+
+  room.creeps.push(hauler);
+  room.creeps.push(upgrader);
+
+  // Test getAvoidanceMatrix
+  // Should mark Upgrader as obstacle
+  const matrix = TrafficManager.getAvoidanceMatrix(room, ["upgrader"]);
+
+  // Check Upgrader position (11, 10)
+  const cost = matrix.get(11, 10);
+  assert(cost === 255, "Upgrader position should be unwalkable (255)");
+
+  // Check Hauler position (10, 10)
+  const costH = matrix.get(10, 10);
+  assert(costH !== 255, "Hauler position should not be blocked");
+  assert(costH === 10, "Other creeps should have default traffic cost");
 }
 
 function testCache() {
@@ -114,10 +151,11 @@ function testPopulationHighLoad() {
 function testLifecycle() {
   console.log("\n[Test] Lifecycle Management");
   Lifecycle.initMemory();
+  const room = new MockRoom("E1N1");
 
   // 1. Test Monitor
   // Create a dying creep
-  const dyingCreep = new MockCreep("dying_harvester", "harvester");
+  const dyingCreep = new MockCreep("dying_harvester", "harvester", room);
   dyingCreep.ticksToLive = 140; // < 150 (10%)
 
   // Mock Game.creeps

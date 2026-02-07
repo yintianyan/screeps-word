@@ -39,6 +39,15 @@ const moveModule = {
         costCallback: function (roomName, costMatrix) {
           if (roomName !== creep.room.name) return;
 
+          // === 0. Role Avoidance (Highest Priority) ===
+          // 用户指定需要避让的角色 (例如 Hauler 避让 Upgrader)
+          if (opts.avoidRoles && opts.avoidRoles.length > 0) {
+            return TrafficManager.getAvoidanceMatrix(
+              creep.room,
+              opts.avoidRoles,
+            );
+          }
+
           // 1. 获取基础交通拥堵矩阵 (如果需要避让)
           // 只有当 stuckCount > 0 时才避让拥堵，否则只遵循车道规则
           let matrix = costMatrix;

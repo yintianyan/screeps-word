@@ -1,5 +1,5 @@
-const Cache = require("core.cache");
-const Lifecycle = require("module.lifecycle");
+const Cache = require("./core.cache");
+const Lifecycle = require("./module.lifecycle");
 
 const populationModule = {
   // === 配置区域 (Config) ===

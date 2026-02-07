@@ -110,6 +110,34 @@ const TrafficManager = {
   },
 
   /**
+   * Get a matrix that specifically avoids certain roles (marks them as unwalkable)
+   * Used for "Anti-Crowd" logic (e.g., Hauler bypassing Upgraders)
+   * @param {Room} room
+   * @param {string[]} rolesToAvoid Array of role names
+   */
+  getAvoidanceMatrix: function (room, rolesToAvoid) {
+    const costMatrix = new PathFinder.CostMatrix();
+    const creeps = room.find(FIND_CREEPS);
+
+    creeps.forEach((creep) => {
+      // 1. General Traffic Cost (Soft Avoidance)
+      // Penalize all creeps slightly to prefer empty tiles
+      costMatrix.set(creep.pos.x, creep.pos.y, 10);
+
+      // 2. Specific Role Avoidance (Hard Block)
+      if (
+        creep.my &&
+        creep.memory.role &&
+        rolesToAvoid.includes(creep.memory.role)
+      ) {
+        costMatrix.set(creep.pos.x, creep.pos.y, 255); // Unwalkable
+      }
+    });
+
+    return costMatrix;
+  },
+
+  /**
    * Get the directional lane matrix
    * @param {Room} room
    * @param {number} direction TOP/BOTTOM/LEFT/RIGHT
