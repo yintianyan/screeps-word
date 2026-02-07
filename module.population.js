@@ -70,9 +70,24 @@ const populationModule = {
         s.structureType === STRUCTURE_CONTAINER,
     );
 
+    // 能量水平评估
+    // 1. Spawn/Extension 充能率
+    const energyRatio = room.energyAvailable / room.energyCapacityAvailable;
+
+    // 2. Storage 储量 (如果还没有 Storage，暂时视为 0)
+    const storageEnergy = room.storage
+      ? room.storage.store[RESOURCE_ENERGY]
+      : 0;
+
+    // 3. Container 积压量 (如果有大量积压，说明消费端太慢)
+    let containerBacklog = 0;
+    const containers = room.find(FIND_STRUCTURES, {
+      filter: (s) => s.structureType === STRUCTURE_CONTAINER,
+    });
+    containers.forEach((c) => (containerBacklog += c.store[RESOURCE_ENERGY]));
+
     // 默认配置
     targets.builder = 0;
-    const energyRatio = room.energyAvailable / room.energyCapacityAvailable;
 
     if (criticalSites.length > 0) {
       // === 关键基建模式 (Critical Infrastructure) ===
@@ -83,18 +98,39 @@ const populationModule = {
       // === 普通维护模式 (Maintenance/Roads) ===
       // 均衡发展
       targets.builder = 1; // 1 个 Builder 慢慢修路
+
       // Upgrader 根据能量决定
-      targets.upgrader = energyRatio > 0.8 ? 2 : 1;
+      if (storageEnergy > 50000 || containerBacklog > 5000) {
+        targets.upgrader = 2; // 积压较多，允许 2 个
+      } else {
+        targets.upgrader = 1;
+      }
     } else {
       // === 极速发展模式 (Development) ===
       // 全力冲刺 RCL
       targets.builder = 0;
-      if (energyRatio > 0.8) {
-        targets.upgrader = this.config.limits.upgrader; // 3
-      } else if (energyRatio > 0.5) {
+
+      // 动态计算 Upgrader 数量
+      // 基础: 1
+      targets.upgrader = 1;
+
+      // 如果能量极其富裕，大幅增加
+      if (storageEnergy > 100000) {
+        targets.upgrader = 3; // 甚至可以更多，但先限制在 3
+      } else if (storageEnergy > 20000 || containerBacklog > 4000) {
         targets.upgrader = 2;
-      } else {
-        targets.upgrader = 1;
+      }
+
+      // 如果 Spawn 能量也是满的，且 Hauler 闲置率高（难以直接获取闲置率，用 Container 满载来推断）
+      // 如果 Container 几乎都满了 (>1800)，说明运不出去也用不掉
+      const fullContainers = containers.filter(
+        (c) => c.store[RESOURCE_ENERGY] > 1800,
+      );
+      if (fullContainers.length >= 2 && energyRatio > 0.9) {
+        targets.upgrader = Math.max(targets.upgrader, 3);
+        console.log(
+          "⚡ Energy Surplus Detected: Boosting Upgrader count to consume excess energy.",
+        );
       }
     }
 

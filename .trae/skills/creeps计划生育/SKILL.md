@@ -38,9 +38,11 @@ description: "管理 Creep 的计划生育策略。在调整人口数量、优�
 
 - **基准**：1 名（维持 Controller 不降级）。
 - **动态调整**：
-  - **富裕模式**：如果房间能量 > 80% 且 Storage 能量充足，增加至 2-3 名。
+  - **富裕模式**：如果 Storage 能量 > 20,000 或 Mining Container 积压严重，增加至 2 名。
+  - **极度富裕模式**：如果 Storage 能量 > 100,000 或所有 Mining Container 都满载，增加至 3 名（甚至更多）。
   - **紧急模式**：如果 Controller 降级计时 < 4000 ticks，强制设定为 3 名（最高优先级）。
   - **基建让路**：如果有大量工地（Container/Extension），降至 1 名以节省能量。
+- **Super Upgrader**：当能量极度充裕时，孵化拥有更多 WORK 部件 (6+) 的升级者，单体消耗能力翻倍。
 
 ### 建造者 (Builder)
 

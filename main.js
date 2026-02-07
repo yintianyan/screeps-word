@@ -138,6 +138,22 @@ module.exports.loop = function () {
       // 3. 升级者 (Upgrader): 固定不动 (Stationary)
       // 配置: Max WORK + Min CARRY + Min MOVE (只需要走到 Controller)
       if (role === "upgrader") {
+        // 如果能量极度富裕 (Storage > 50k 或 Container 积压严重)，允许孵化 "Super Upgrader"
+        // 增加 WORK 部件以提高单体消耗能力
+        const storageEnergy = spawn.room.storage
+          ? spawn.room.storage.store[RESOURCE_ENERGY]
+          : 0;
+        let isSuper = false;
+
+        if (storageEnergy > 50000 || spawn.room.energyAvailable > 1000) {
+          isSuper = true;
+        }
+
+        if (isSuper && capacity >= 800) {
+          // 6 WORK (600) + 1 CARRY (50) + 3 MOVE (150) = 800
+          return [WORK, WORK, WORK, WORK, WORK, WORK, CARRY, MOVE, MOVE, MOVE];
+        }
+
         // Upgrader 不需要太多 CARRY，因为 Hauler 会源源不断送货
         // 重点是 WORK 的吞吐量
         if (capacity >= 550) return [WORK, WORK, WORK, WORK, CARRY, MOVE, MOVE]; // Cost: 550 (4 WORK!)
