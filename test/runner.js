@@ -1,6 +1,6 @@
 /**
- * Unit Test Runner
- * Executes tests against the modules
+ * 单元测试运行器
+ * 对各个模块执行单元测试
  */
 
 const {
@@ -12,7 +12,7 @@ const {
 } = require("./mocks");
 setupGlobal();
 
-// Modules
+// 引入模块
 const populationModule = require("../module.population");
 const Cache = require("../core.cache");
 const Lifecycle = require("../module.lifecycle");
@@ -26,24 +26,24 @@ function assert(condition, message) {
 }
 
 function runTests() {
-  console.log("=== Running Unit Tests ===");
+  console.log("=== 运行单元测试 ===");
 
-  // Test 1: Cache functionality
+  // 测试 1: 缓存功能
   testCache();
 
-  // Test 2: Population Logic (Basic)
+  // 测试 2: 人口逻辑 (基础)
   testPopulationBasic();
 
-  // Test 3: Population Logic (High Load)
+  // 测试 3: 人口逻辑 (高负载)
   testPopulationHighLoad();
 
-  // Test 4: Lifecycle Logic
+  // 测试 4: 生命周期逻辑
   testLifecycle();
 
-  // Test 5: Path Avoidance Logic
+  // 测试 5: 路径避让逻辑
   testPathAvoidance();
 
-  console.log("\nAll Tests Passed!");
+  console.log("\n所有测试通过!");
 }
 
 function testPathAvoidance() {

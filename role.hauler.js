@@ -19,7 +19,7 @@ const roleHauler = {
     if (!creep.memory.hauling && creep.store[RESOURCE_ENERGY] > 0) {
       if (creep.room.energyAvailable < creep.room.energyCapacityAvailable) {
         creep.memory.hauling = true;
-        creep.say("🚨 rescue");
+        creep.say("🚨 救援");
       }
     }
 

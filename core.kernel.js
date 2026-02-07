@@ -1,36 +1,36 @@
 const Cache = require('core.cache');
 
 /**
- * Core Kernel
+ * 核心内核 (Core Kernel)
  * 
- * Manages the lifecycle of all game modules.
- * Responsibilities:
- * 1. Initialize and shutdown modules.
- * 2. Run modules with error handling (try-catch).
- * 3. Monitor CPU usage per module.
+ * 管理所有游戏模块的生命周期。
+ * 职责：
+ * 1. 初始化和关闭模块。
+ * 2. 运行模块并处理错误 (try-catch)。
+ * 3. 监控每个模块的 CPU 使用率。
  */
 const Kernel = {
     modules: [],
     profiler: {},
 
     /**
-     * Register a module to the kernel
-     * @param {string} name 
-     * @param {Object} module Object with run(room) or run() method
-     * @param {string} type 'room' (default) or 'global'
+     * 注册模块到内核
+     * @param {string} name 模块名称
+     * @param {Object} module 包含 run(room) 或 run() 方法的对象
+     * @param {string} type 'room' (默认) 或 'global'
      */
     register: function(name, module, type = 'room') {
         this.modules.push({ name, module, type });
     },
 
     /**
-     * Main execution loop. Call this in main.js
+     * 主执行循环。在 main.js 中调用
      */
     run: function() {
-        // 1. System Maintenance
-        Cache.clearTick(); // Reset tick cache
+        // 1. 系统维护
+        Cache.clearTick(); // 重置 tick 缓存
         
-        // Clear dead memory
+        // 清理失效内存
         if (Game.time % 10 === 0) {
             for (const name in Memory.creeps) {
                 if (!Game.creeps[name]) {
@@ -39,16 +39,16 @@ const Kernel = {
             }
         }
 
-        // 2. Run Modules for Each Room
-        // We iterate rooms first, then modules, to share room-level cache
+        // 2. 逐房间运行模块
+        // 优先遍历房间，再遍历模块，以共享房间级缓存
         for (const name in Game.rooms) {
             const room = Game.rooms[name];
             
-            // Skip unowned rooms if necessary, but we might want to scout them
+            // 如果需要，跳过非己方房间，但我们可能想要侦查它们
             if (!room.controller || !room.controller.my) continue;
 
             this.modules.forEach(({ name, module, type }) => {
-                if (type === 'global') return; // Skip global modules in room loop
+                if (type === 'global') return; // 在房间循环中跳过全局模块
 
                 const startCpu = Game.cpu.getUsed();
                 try {
@@ -56,14 +56,14 @@ const Kernel = {
                         module.run(room);
                     }
                 } catch (e) {
-                    console.log(`[Kernel] Error in module ${name}: ${e.stack}`);
+                    console.log(`[Kernel] 模块 ${name} 发生错误: ${e.stack}`);
                 }
                 const used = Game.cpu.getUsed() - startCpu;
                 this.recordStats(name, used);
             });
         }
 
-        // 3. Run Global Modules
+        // 3. 运行全局模块
         this.modules.forEach(({ name, module, type }) => {
             if (type !== 'global') return;
 
@@ -73,7 +73,7 @@ const Kernel = {
                     module.run();
                 }
             } catch (e) {
-                console.log(`[Kernel] Error in global module ${name}: ${e.stack}`);
+                console.log(`[Kernel] 全局模块 ${name} 发生错误: ${e.stack}`);
             }
             const used = Game.cpu.getUsed() - startCpu;
             this.recordStats(name, used);

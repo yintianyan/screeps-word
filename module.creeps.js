@@ -4,11 +4,11 @@ const roleBuilder = require("role.builder");
 const roleHauler = require("role.hauler");
 
 /**
- * Module: Creeps
- * Executes logic for all creeps
+ * 模块：Creeps
+ * 执行所有 Creep 的逻辑
  */
 const creepsModule = {
-  // Run as a Global Module
+  // 作为全局模块运行
   run: function () {
     for (const name in Game.creeps) {
       const creep = Game.creeps[name];

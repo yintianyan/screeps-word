@@ -39,7 +39,7 @@ const moveModule = {
         costCallback: function (roomName, costMatrix) {
           if (roomName !== creep.room.name) return;
 
-          // === 0. Role Avoidance (Highest Priority) ===
+          // === 0. 角色避让 (最高优先级) ===
           // 用户指定需要避让的角色 (例如 Hauler 避让 Upgrader)
           if (opts.avoidRoles && opts.avoidRoles.length > 0) {
             return TrafficManager.getAvoidanceMatrix(
@@ -52,7 +52,7 @@ const moveModule = {
           // 只有当 stuckCount > 0 时才避让拥堵，否则只遵循车道规则
           let matrix = costMatrix;
 
-          // 2. 叠加车道偏好 (Lane Bias)
+          // 2. 叠加车道偏好 (车道偏向)
           // 计算大致方向
           let direction = 0;
           const dx = target.pos
@@ -63,10 +63,10 @@ const moveModule = {
             : target.y - creep.pos.y;
 
           if (Math.abs(dy) > Math.abs(dx)) {
-            // Vertical
+            // 垂直方向
             direction = dy < 0 ? TOP : BOTTOM;
           } else {
-            // Horizontal
+            // 水平方向
             direction = dx < 0 ? LEFT : RIGHT;
           }
 
@@ -77,7 +77,7 @@ const moveModule = {
             );
             if (laneMatrix) {
               // 合并矩阵: PathFinder 会自动处理，但我们需要返回一个 CostMatrix
-              // 由于不能直接 merge 两个 CM，我们需要 clone 一个并叠加
+              // 由于不能直接合并两个 CM，我们需要克隆一个并叠加
               // 或者，为了性能，我们直接返回 laneMatrix，并在其中动态叠加拥堵？
               // 不，laneMatrix 是静态缓存的，不能修改。
 
@@ -137,7 +137,7 @@ const moveModule = {
   },
 
   /**
-   * Check if creep is standing on a road
+   * 检查 Creep 是否站在道路上
    * @param {Creep} creep
    * @returns {boolean}
    */
@@ -148,16 +148,16 @@ const moveModule = {
   },
 
   /**
-   * Move off the road to a random adjacent walkable tile
-   * Keeps within range of anchor if provided
+   * 移出道路到随机的相邻可行走地块
+   * 如果提供锚点，则保持在锚点范围内
    * @param {Creep} creep
-   * @param {RoomPosition|Object} anchor (Optional) Target to stay near
-   * @param {number} range (Optional) Max range from anchor
+   * @param {RoomPosition|Object} anchor (可选) 要保持在其附近的目标
+   * @param {number} range (可选) 离锚点的最大范围
    */
   parkOffRoad: function (creep, anchor = null, range = 1) {
-    if (!this.isOnRoad(creep)) return; // Already off road
+    if (!this.isOnRoad(creep)) return; // 已经在非道路上
 
-    // Find valid spot
+    // 寻找有效位置
     const terrain = creep.room.getTerrain();
     const adjacent = [];
 
@@ -167,36 +167,36 @@ const moveModule = {
         const targetX = creep.pos.x + x;
         const targetY = creep.pos.y + y;
 
-        // Boundary check
+        // 边界检查
         if (targetX < 1 || targetX > 48 || targetY < 1 || targetY > 48)
           continue;
 
         const pos = new RoomPosition(targetX, targetY, creep.room.name);
 
-        // Check terrain (Wall)
+        // 检查地形 (墙壁)
         if (terrain.get(targetX, targetY) === TERRAIN_MASK_WALL) continue;
 
-        // Check structures (Road or Obstacle)
+        // 检查建筑 (路或障碍物)
         const structures = pos.lookFor(LOOK_STRUCTURES);
-        // Avoid Roads
+        // 避开道路
         if (structures.some((s) => s.structureType === STRUCTURE_ROAD))
           continue;
-        // Avoid Obstacles (Manual check for common ones or trust moveTo logic? Here we need manual check)
+        // 避开障碍物 (手动检查常见障碍物或信任 moveTo 逻辑? 这里我们需要手动检查)
         if (
           structures.some(
             (s) =>
               s.structureType !== STRUCTURE_CONTAINER &&
               s.structureType !== STRUCTURE_RAMPART &&
               (OBSTACLE_OBJECT_TYPES.includes(s.structureType) ||
-                s.structureType === "constructedWall"), // constructedWall is in OBSTACLE_OBJECT_TYPES usually
+                s.structureType === "constructedWall"), // constructedWall 通常在 OBSTACLE_OBJECT_TYPES 中
           )
         )
           continue;
 
-        // Check creeps
+        // 检查 Creeps
         if (pos.lookFor(LOOK_CREEPS).length > 0) continue;
 
-        // Check anchor range
+        // 检查锚点范围
         if (anchor && !pos.inRangeTo(anchor, range)) continue;
 
         adjacent.push(pos);
@@ -204,7 +204,7 @@ const moveModule = {
     }
 
     if (adjacent.length > 0) {
-      // Pick random or first
+      // 随机选择或选择第一个
       const target = adjacent[Math.floor(Math.random() * adjacent.length)];
       creep.move(creep.pos.getDirectionTo(target));
       creep.say("🚷 park");

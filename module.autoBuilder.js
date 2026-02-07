@@ -4,7 +4,7 @@ const autoBuilder = {
     if (!spawn) return;
 
     // === 高频检查 (每 10 tick): 关键基础设施 (Containers) ===
-    // [DEPRECATED] Container 逻辑已迁移至 module.structurePlanner.js
+    // [已废弃] Container 逻辑已迁移至 module.structurePlanner.js
     /*
         if (Game.time % 10 === 0) {
             const currentRCL = room.controller.level;
@@ -63,7 +63,7 @@ const autoBuilder = {
       for (let dist = 2; dist <= 6; dist++) {
         for (let x = spawn.pos.x - dist; x <= spawn.pos.x + dist; x++) {
           for (let y = spawn.pos.y - dist; y <= spawn.pos.y + dist; y++) {
-            // 只在边框上检查 (Spiral)
+            // 只在边框上检查 (螺旋)
             if (
               x === spawn.pos.x - dist ||
               x === spawn.pos.x + dist ||
@@ -126,7 +126,7 @@ const autoBuilder = {
       // 1. 构建主车道
       this.createRoadSite(room, step.x, step.y);
 
-      // 2. 构建副车道 (Parallel Lane)
+      // 2. 构建副车道 (平行车道)
       // 简单的逻辑：检查当前点到下一点的方向，然后在垂直方向偏移 1 格
       // 如果是最后一点，沿用上一点的方向
       let nextStep = path[index + 1];

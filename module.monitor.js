@@ -39,12 +39,12 @@ const monitorModule = {
     const y = 1;
 
     // 标题
-    visual.text(`📊 Colony Monitor [${room.name}]`, x, y, {
+    visual.text(`📊 殖民地监控 [${room.name}]`, x, y, {
       align: "left",
       font: 0.8,
       color: "#ffffff",
     });
-    visual.text(`Energy: ${totalEnergy} / ${capacity}`, x, y + 1, {
+    visual.text(`能量: ${totalEnergy} / ${capacity}`, x, y + 1, {
       align: "left",
       font: 0.6,
       color: "#00ff00",
@@ -55,13 +55,13 @@ const monitorModule = {
       const progress = Math.floor(
         (room.controller.progress / room.controller.progressTotal) * 100,
       );
-      visual.text(`RCL: ${room.controller.level} (${progress}%)`, x, y + 1.8, {
+      visual.text(`等级: ${room.controller.level} (${progress}%)`, x, y + 1.8, {
         align: "left",
         font: 0.6,
         color: "#aaaaaa",
       });
       visual.text(
-        `Downgrade: ${room.controller.ticksToDowngrade}`,
+        `降级倒计时: ${room.controller.ticksToDowngrade}`,
         x,
         y + 2.5,
         {
@@ -100,7 +100,7 @@ const monitorModule = {
 
     // 3. 矿源运输状态 (Transport Status)
     row += 1.5;
-    visual.text(`🚚 Transport Lines:`, x, row, {
+    visual.text(`🚚 运输线状态:`, x, row, {
       align: "left",
       font: 0.7,
       color: "#00ffff",
@@ -138,7 +138,7 @@ const monitorModule = {
       else if (energy > 1000) color = "#ffff00";
       if (!container) color = "#555555";
 
-      visual.text(`Src ${source.id.substr(-4)}:`, x, row, {
+      visual.text(`源 ${source.id.substr(-4)}:`, x, row, {
         align: "left",
         font: 0.5,
         color: "#ffffff",
@@ -165,14 +165,14 @@ const monitorModule = {
     // 4. 异常警告
     row += 0.5;
     if (stats.harvester.count === 0) {
-      visual.text(`⚠️ NO HARVESTERS!`, x, row + 1, {
+      visual.text(`⚠️ 警告: 无采集者!`, x, row + 1, {
         align: "left",
         color: "#ff0000",
         font: 0.7,
       });
     }
     if (stats.hauler.count === 0 && stats.harvester.count > 0) {
-      visual.text(`⚠️ NO HAULERS!`, x, row + 2, {
+      visual.text(`⚠️ 警告: 无搬运工!`, x, row + 2, {
         align: "left",
         color: "#ff0000",
         font: 0.7,

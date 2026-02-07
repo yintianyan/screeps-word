@@ -1,46 +1,46 @@
 /**
- * Intelligent Traffic Control System
+ * 智能交通控制系统 (Intelligent Traffic Control System)
  *
- * 1. Congestion Monitoring: Tracks creep movement and identifies stuck creeps.
- * 2. Dynamic CostMatrix: Increases cost of congested tiles to force pathfinding rerouting.
- * 3. Visualization: Displays traffic heatmaps (Green = Free, Red = Jammed).
+ * 1. 拥堵监控：追踪 Creep 移动并识别卡住的 Creep。
+ * 2. 动态 CostMatrix：增加拥堵地块的通行成本，强制寻路算法重算路径。
+ * 3. 可视化：显示交通热力图（绿色=畅通，红色=拥堵）。
  */
 const TrafficManager = {
-  // Configuration
+  // 配置
   config: {
-    stuckThreshold: 2, // Ticks to wait before considering a creep stuck
-    congestionCost: 50, // Cost added to a tile if occupied by a stuck creep
+    stuckThreshold: 2, // 判定为卡住的等待 tick 数
+    congestionCost: 50, // 拥堵地块增加的 Cost
     visualize: true,
   },
 
   /**
-   * Run every tick to update traffic data
+   * 每 tick 运行以更新交通数据
    * @param {Room} room
    */
   run: function (room) {
-    if (Game.time % 1 !== 0) return; // Run every tick for real-time accuracy
+    if (Game.time % 1 !== 0) return; // 实时更新
 
-    // Initialize lane matrices if not present (Lazy Load)
+    // 初始化车道矩阵 (懒加载)
     if (!room._laneMatrices) {
       this.generateLaneMatrices(room);
     }
 
-    // 1. Monitoring & Visualization
+    // 1. 监控与可视化
     if (this.config.visualize) {
       this.visualizeTraffic(room);
     }
   },
 
   /**
-   * Generate static lane preference matrices for the room
-   * "Left-Hand Traffic" Rule:
-   * - Vertical: Left Lane (x) = Up/North, Right Lane (x+1) = Down/South
-   * - Horizontal: Top Lane (y) = Left/West, Bottom Lane (y+1) = Right/East
+   * 生成房间的静态车道偏好矩阵
+   * "左进右出" (Left-Hand Traffic) 规则:
+   * - 垂直道路: 左车道 (x) = 向上/北, 右车道 (x+1) = 向下/南
+   * - 水平道路: 上车道 (y) = 向左/西, 下车道 (y+1) = 向右/东
    * @param {Room} room
    */
   generateLaneMatrices: function (room) {
-    // We create 4 matrices for 4 directions
-    // 1: Top, 3: Right, 5: Bottom, 7: Left (Screeps Constants)
+    // 为 4 个方向创建 4 个矩阵
+    // 1: Top, 3: Right, 5: Bottom, 7: Left (Screeps 常量)
     const matrices = {
       [TOP]: new PathFinder.CostMatrix(),
       [BOTTOM]: new PathFinder.CostMatrix(),
@@ -49,8 +49,8 @@ const TrafficManager = {
     };
 
     const terrain = room.getTerrain();
-    // Scan all roads (structures)
-    // Note: This relies on built roads. For planned roads, we might need to look at sites.
+    // 扫描所有道路 (建筑)
+    // 注意：依赖已建成的道路。对于规划中的道路，可能需要查看工地。
     const roads = room.find(FIND_STRUCTURES, {
       filter: (s) => s.structureType === STRUCTURE_ROAD,
     });
@@ -59,30 +59,30 @@ const TrafficManager = {
       const x = road.pos.x;
       const y = road.pos.y;
 
-      // 1. Check for Vertical Double Lane (Road at x+1 or x-1)
+      // 1. 检查垂直双车道 (x+1 或 x-1 有路)
       const hasRight =
         room
           .lookForAt(LOOK_STRUCTURES, x + 1, y)
           .some((s) => s.structureType === STRUCTURE_ROAD) ||
-        terrain.get(x + 1, y) === TERRAIN_MASK_WALL; // Treat wall as "other side"? No.
+        terrain.get(x + 1, y) === TERRAIN_MASK_WALL; // 墙壁视为"对面"? 不。
       const hasLeft = room
         .lookForAt(LOOK_STRUCTURES, x - 1, y)
         .some((s) => s.structureType === STRUCTURE_ROAD);
 
-      // Rule: Left (x) = Up, Right (x+1) = Down
+      // 规则: 左 (x) = 上, 右 (x+1) = 下
       if (hasRight && !hasLeft) {
-        // This is the Left Lane of a pair
-        // Bias: Good for UP (Top), Bad for DOWN (Bottom)
-        matrices[TOP].set(x, y, 1); // Prefer
-        matrices[BOTTOM].set(x, y, 5); // Penalize
+        // 这是左车道
+        // 偏好: 利于向上 (Top), 不利于向下 (Bottom)
+        matrices[TOP].set(x, y, 1); // 优先
+        matrices[BOTTOM].set(x, y, 5); // 惩罚
       } else if (hasLeft && !hasRight) {
-        // This is the Right Lane of a pair
-        // Bias: Good for DOWN (Bottom), Bad for UP (Top)
+        // 这是右车道
+        // 偏好: 利于向下 (Bottom), 不利于向上 (Top)
         matrices[BOTTOM].set(x, y, 1);
         matrices[TOP].set(x, y, 5);
       }
 
-      // 2. Check for Horizontal Double Lane (Road at y+1 or y-1)
+      // 2. 检查水平双车道 (y+1 或 y-1 有路)
       const hasBottom = room
         .lookForAt(LOOK_STRUCTURES, x, y + 1)
         .some((s) => s.structureType === STRUCTURE_ROAD);
@@ -90,47 +90,47 @@ const TrafficManager = {
         .lookForAt(LOOK_STRUCTURES, x, y - 1)
         .some((s) => s.structureType === STRUCTURE_ROAD);
 
-      // Rule: Top (y) = Left (West), Bottom (y+1) = Right (East)
+      // 规则: 上 (y) = 左 (西), 下 (y+1) = 右 (东)
       if (hasBottom && !hasTop) {
-        // This is the Top Lane
-        // Bias: Good for LEFT (West), Bad for RIGHT (East)
+        // 这是上车道
+        // 偏好: 利于向左 (West), 不利于向右 (East)
         matrices[LEFT].set(x, y, 1);
         matrices[RIGHT].set(x, y, 5);
       } else if (hasTop && !hasBottom) {
-        // This is the Bottom Lane
-        // Bias: Good for RIGHT (East), Bad for LEFT (West)
+        // 这是下车道
+        // 偏好: 利于向右 (East), 不利于向左 (West)
         matrices[RIGHT].set(x, y, 1);
         matrices[LEFT].set(x, y, 5);
       }
     });
 
     room._laneMatrices = matrices;
-    // Cache expiry: clear every 1000 ticks or on construction finish?
-    // For now, let it persist in Heap. Heap is cleared on global reset.
+    // 缓存过期：每 1000 ticks 清除或建筑完成后清除？
+    // 目前让其在 Heap 中持久化。Global 重置时会清除。
   },
 
   /**
-   * Get a matrix that specifically avoids certain roles (marks them as unwalkable)
-   * Used for "Anti-Crowd" logic (e.g., Hauler bypassing Upgraders)
+   * 获取特定避让矩阵（标记特定角色为不可通行）
+   * 用于“反拥挤”逻辑（例如 Hauler 绕过 Upgrader）
    * @param {Room} room
-   * @param {string[]} rolesToAvoid Array of role names
+   * @param {string[]} rolesToAvoid 要避让的角色名称数组
    */
   getAvoidanceMatrix: function (room, rolesToAvoid) {
     const costMatrix = new PathFinder.CostMatrix();
     const creeps = room.find(FIND_CREEPS);
 
     creeps.forEach((creep) => {
-      // 1. General Traffic Cost (Soft Avoidance)
-      // Penalize all creeps slightly to prefer empty tiles
+      // 1. 一般交通成本 (软避让)
+      // 轻微惩罚所有 Creep 位置，倾向于走空地
       costMatrix.set(creep.pos.x, creep.pos.y, 10);
 
-      // 2. Specific Role Avoidance (Hard Block)
+      // 2. 特定角色避让 (硬阻挡)
       if (
         creep.my &&
         creep.memory.role &&
         rolesToAvoid.includes(creep.memory.role)
       ) {
-        costMatrix.set(creep.pos.x, creep.pos.y, 255); // Unwalkable
+        costMatrix.set(creep.pos.x, creep.pos.y, 255); // 不可通行
       }
     });
 
@@ -138,7 +138,7 @@ const TrafficManager = {
   },
 
   /**
-   * Get the directional lane matrix
+   * 获取方向性车道矩阵
    * @param {Room} room
    * @param {number} direction TOP/BOTTOM/LEFT/RIGHT
    */
@@ -148,7 +148,7 @@ const TrafficManager = {
   },
 
   /**
-   * Generate a CostMatrix that accounts for traffic
+   * 生成包含交通状况的 CostMatrix
    * @param {Room} room
    * @returns {CostMatrix}
    */
@@ -157,20 +157,20 @@ const TrafficManager = {
     const creeps = room.find(FIND_CREEPS);
 
     creeps.forEach((creep) => {
-      // Base cost for any creep (avoid walking through people if possible)
+      // 基础成本 (尽量避免穿过人)
       let cost = 0;
 
-      // If creep is idle/stuck, increase cost significantly
+      // 如果 Creep 卡住/闲置，显著增加成本
       if (creep.memory.idleTicks > this.config.stuckThreshold) {
         cost = this.config.congestionCost;
       } else if (creep.fatigue > 0) {
-        cost = 10; // Tired creeps are slow obstacles
+        cost = 10; // 疲劳的 Creep 是缓慢的障碍物
       } else {
-        cost = 5; // Moving creeps are minor obstacles
+        cost = 5; // 移动中的 Creep 是轻微障碍
       }
 
-      // Set cost (only if higher than existing)
-      // Note: We don't overwrite walls (255), but PathFinder handles that.
+      // 设置成本 (仅当高于现有值时)
+      // 注意：我们不覆盖墙壁 (255)，PathFinder 会处理。
       costs.set(creep.pos.x, creep.pos.y, cost);
     });
 
@@ -178,7 +178,7 @@ const TrafficManager = {
   },
 
   /**
-   * Visualizes traffic status
+   * 可视化交通状态
    * @param {Room} room
    */
   visualizeTraffic: function (room) {
@@ -187,21 +187,21 @@ const TrafficManager = {
 
     creeps.forEach((creep) => {
       if (creep.memory.idleTicks > 2) {
-        // Stuck / Idle: Red Circle
+        // 卡住/闲置: 红圈
         visual.circle(creep.pos, {
           fill: "transparent",
           radius: 0.4,
           stroke: "#ff0000",
         });
       } else {
-        // Moving: Green Dot
+        // 移动中: 绿点
         // visual.circle(creep.pos, {fill: '#00ff00', radius: 0.1});
       }
     });
   },
 
   /**
-   * Helper to track idle time (Called by Creep logic or Kernel)
+   * 追踪空闲时间的辅助函数 (由 Creep 逻辑或内核调用)
    */
   trackCreep: function (creep) {
     if (!creep.memory._lastPos) {

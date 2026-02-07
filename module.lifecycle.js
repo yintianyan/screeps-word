@@ -1,21 +1,21 @@
 /**
- * Lifecycle Management System
+ * 生命周期管理系统 (Lifecycle Management System)
  * 
- * Responsibilities:
- * 1. Monitor Creep Health: Detects when TTL < 10% (150 ticks).
- * 2. Manage Replacement: Queues replacement spawns with memory inheritance.
- * 3. Logging & History: Tracks spawn events.
+ * 职责：
+ * 1. 监控 Creep 健康状态：检测 TTL < 10% (150 ticks) 的情况。
+ * 2. 管理替换：将替换请求加入队列，并支持内存继承。
+ * 3. 日志与历史：追踪孵化事件。
  */
 const Lifecycle = {
-    // Configuration
+    // 配置
     config: {
-        thresholdRatio: 0.1, // 10% life remaining triggers replacement
-        checkInterval: 5,    // Run checks every 5 ticks to save CPU
+        thresholdRatio: 0.1, // 剩余寿命 10% 时触发替换
+        checkInterval: 5,    // 每 5 ticks 检查一次以节省 CPU
         historyLength: 50
     },
 
     /**
-     * Main run loop
+     * 主运行循环
      */
     run: function() {
         if (Game.time % this.config.checkInterval !== 0) return;
@@ -36,7 +36,7 @@ const Lifecycle = {
     },
 
     /**
-     * Scans all creeps to check for replacement needs
+     * 扫描所有 Creep 以检查是否需要替换
      */
     monitorCreeps: function() {
         const registry = Memory.lifecycle.registry;
@@ -45,29 +45,29 @@ const Lifecycle = {
         for (const name in Game.creeps) {
             const creep = Game.creeps[name];
             
-            // Skip if already being handled
+            // 如果已经在处理中，则跳过
             if (registry[name] === 'PRE_SPAWNING') continue;
             if (creep.spawning) continue;
 
-            const maxLife = 1500; // Standard creep life
+            const maxLife = 1500; // 标准 Creep 寿命
             const threshold = maxLife * this.config.thresholdRatio; // 150 ticks
 
             if (creep.ticksToLive < threshold) {
-                // Trigger Replacement
-                console.log(`[Lifecycle] ⚠️ ${name} is dying (TTL: ${creep.ticksToLive}). Requesting replacement.`);
+                // 触发替换
+                console.log(`[Lifecycle] ⚠️ ${name} 濒死 (TTL: ${creep.ticksToLive}). 请求替换。`);
                 
                 registry[name] = 'PRE_SPAWNING';
                 
-                // Create Spawn Request
+                // 创建孵化请求
                 requests[name] = {
                     role: creep.memory.role,
-                    baseMemory: JSON.parse(JSON.stringify(creep.memory)), // Deep copy
+                    baseMemory: JSON.parse(JSON.stringify(creep.memory)), // 深拷贝
                     priority: this.getPriority(creep.memory.role),
                     requestTime: Game.time
                 };
 
-                // Log
-                this.logEvent(name, 'WARNING', `TTL < ${threshold}, requested replacement`);
+                // 记录日志
+                this.logEvent(name, 'WARNING', `TTL < ${threshold}, 已请求替换`);
             } else {
                 registry[name] = 'NORMAL';
             }
@@ -75,7 +75,7 @@ const Lifecycle = {
     },
 
     /**
-     * Determines priority based on role
+     * 根据角色确定优先级
      */
     getPriority: function(role) {
         const priorities = {
@@ -88,17 +88,17 @@ const Lifecycle = {
     },
 
     /**
-     * Called by Spawner when a replacement is successfully spawned
+     * 当替换者成功孵化时由 Spawner 调用
      */
     notifySpawn: function(oldCreepName, newCreepName) {
         if (Memory.lifecycle.requests[oldCreepName]) {
             delete Memory.lifecycle.requests[oldCreepName];
-            this.logEvent(oldCreepName, 'REPLACED', `Replacement spawned: ${newCreepName}`);
+            this.logEvent(oldCreepName, 'REPLACED', `替换者已孵化: ${newCreepName}`);
         }
     },
 
     /**
-     * Cleans up dead creeps from registry
+     * 从注册表中清理死亡的 Creep
      */
     cleanupMemory: function() {
         const registry = Memory.lifecycle.registry;
@@ -106,10 +106,10 @@ const Lifecycle = {
 
         for (const name in registry) {
             if (!Game.creeps[name]) {
-                // Creep is dead
+                // Creep 已死亡
                 if (requests[name]) {
-                    // If request still exists, it means we failed to replace in time!
-                    this.logEvent(name, 'FAILURE', 'Creep died before replacement could be spawned');
+                    // 如果请求仍存在，说明未能及时替换！
+                    this.logEvent(name, 'FAILURE', 'Creep 在替换者孵化前已死亡');
                     delete requests[name];
                 }
                 delete registry[name];
@@ -118,15 +118,15 @@ const Lifecycle = {
     },
 
     /**
-     * Check if a creep counts towards population limits
-     * Returns FALSE if the creep is dying and has requested a replacement
-     * This allows the population counter to "make room" for the new one
+     * 检查 Creep 是否计入人口限制
+     * 如果 Creep 濒死且已请求替换，返回 FALSE
+     * 这允许人口计数器为新 Creep "腾出空间"
      */
     isOperational: function(creep) {
         if (!Memory.lifecycle || !Memory.lifecycle.registry) return true;
         
-        // If it's marked as PRE_SPAWNING, it effectively doesn't count, 
-        // allowing the Spawner to create its replacement without hitting the cap.
+        // 如果标记为 PRE_SPAWNING，它实际上不再计入，
+        // 允许 Spawner 在不触及上限的情况下创建其替换者。
         if (Memory.lifecycle.registry[creep.name] === 'PRE_SPAWNING') {
             return false;
         }
@@ -134,13 +134,13 @@ const Lifecycle = {
     },
 
     /**
-     * Get pending spawn requests
+     * 获取待处理的孵化请求
      */
     getRequests: function() {
         return Memory.lifecycle ? Memory.lifecycle.requests : {};
     },
 
-    // === API & Logging ===
+    // === API & 日志 ===
 
     logEvent: function(creepName, type, message) {
         const entry = {

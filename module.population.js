@@ -18,10 +18,10 @@ const populationModule = {
   },
 
   /**
-   * Standard Kernel Module Interface
+   * 标准内核模块接口
    */
   run: function (room) {
-    // Run rebalancing every 5 ticks
+    // 每 5 tick 运行一次重新平衡
     if (Game.time % 5 === 0) {
       this.rebalanceHaulers(room);
     }
@@ -36,14 +36,14 @@ const populationModule = {
       hauler: 0,
     };
 
-    // Use Cache to get sources (Heap Cached)
+    // 使用缓存获取 Source (堆缓存)
     const sources = Cache.getHeap(`sources_${room.name}`, () =>
       room.find(FIND_SOURCES),
     );
     const sourceCount = sources.length;
 
-    // Use Cache to get creeps by role (Tick Cached)
-    // Filter out non-operational creeps (dying ones) to avoid double counting
+    // 使用缓存获取各角色 Creep (Tick 缓存)
+    // 过滤掉非活跃状态的 Creep (濒死者) 以避免重复计算
     const allHaulers = Cache.getCreepsByRole(room, "hauler");
     const haulers = allHaulers.filter((c) => Lifecycle.isOperational(c));
 
@@ -66,8 +66,8 @@ const populationModule = {
       targets.hauler = 1;
     }
 
-    // 3. Smart Spender Balancing
-    // Use Cache for construction sites
+    // 3. 智能支出者平衡 (Smart Spender Balancing)
+    // 使用缓存获取建筑工地
     const sites = Cache.getTick(`sites_${room.name}`, () =>
       room.find(FIND_CONSTRUCTION_SITES),
     );
@@ -90,7 +90,7 @@ const populationModule = {
       ? room.storage.store.getCapacity(RESOURCE_ENERGY)
       : 0;
 
-    // Use Cache for containers
+    // 使用缓存获取容器
     const containers = Cache.getStructures(room, STRUCTURE_CONTAINER);
     let containerBacklog = 0;
     containers.forEach((c) => (containerBacklog += c.store[RESOURCE_ENERGY]));
@@ -162,12 +162,12 @@ const populationModule = {
    */
   getHaulerNeeds: function (room) {
     const needs = {};
-    // Use Cache
+    // 使用缓存
     const sources = Cache.getHeap(`sources_${room.name}`, () =>
       room.find(FIND_SOURCES),
     );
 
-    // 检查是否有全局等待情况 (Upgrader/Builder Starvation)
+    // 检查是否有全局等待情况 (Upgrader/Builder 饥饿)
     // 如果 Upgrader 等待时间过长，说明运力不足，给每个 Source 都增加配额
     let globalBoost = 0;
     const upgraders = Cache.getCreepsByRole(room, "upgrader").filter((c) =>
@@ -194,8 +194,8 @@ const populationModule = {
 
       let count = this.config.ratios.haulerBaseCount;
 
-      // 1. 检查 Container 积压 (Use Cached Structures if possible, but findInRange is specific)
-      // Optimization: Get all containers from cache and filter by range manually (cheaper than findInRange)
+      // 1. 检查 Container 积压 (尽可能使用缓存结构，但 findInRange 是特定的)
+      // 优化：从缓存获取所有容器并手动过滤范围 (比 findInRange 便宜)
       const allContainers = Cache.getStructures(room, STRUCTURE_CONTAINER);
       const container = allContainers.find((c) => c.pos.inRangeTo(source, 2));
 
@@ -208,7 +208,7 @@ const populationModule = {
         }
       }
 
-      // 2. 检查掉落能量 (Tick Cache for all dropped resources)
+      // 2. 检查掉落能量 (掉落资源的 Tick 缓存)
       const allDropped = Cache.getTick(`dropped_${room.name}`, () =>
         room.find(FIND_DROPPED_RESOURCES),
       );
@@ -234,12 +234,12 @@ const populationModule = {
    */
   rebalanceHaulers: function (room) {
     const needs = this.getHaulerNeeds(room);
-    // Only rebalance healthy haulers
+    // 仅重新平衡健康的 Hauler
     const haulers = Cache.getCreepsByRole(room, "hauler").filter(
       (c) => c.ticksToLive > 100 && Lifecycle.isOperational(c),
     );
 
-    // ... (Rest of logic is same, but using cached haulers)
+    // ... (其余逻辑相同，但使用缓存的 Haulers)
     const currentCounts = {};
     const surplus = [];
     const deficit = [];
@@ -271,7 +271,7 @@ const populationModule = {
 
     if (surplus.length > 0 && deficit.length > 0) {
       console.log(
-        `[Population] Rebalancing Haulers: Surplus ${surplus.length}, Deficit ${deficit.reduce((a, b) => a + b.amount, 0)}`,
+        `[Population] 重新平衡搬运工: 盈余 ${surplus.length}, 赤字 ${deficit.reduce((a, b) => a + b.amount, 0)}`,
       );
       let surplusIndex = 0;
       for (const item of deficit) {
@@ -283,7 +283,7 @@ const populationModule = {
           delete creep.memory.targetId;
           creep.say("🔀 reassign");
           console.log(
-            `[Population] Reassigning ${creep.name} from Source ${oldSource} to ${item.id}`,
+            `[Population] 将 ${creep.name} 从 Source ${oldSource} 重新分配给 ${item.id}`,
           );
         }
       }
