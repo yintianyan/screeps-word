@@ -110,6 +110,17 @@ module.exports.loop = function () {
       spawn.spawnCreep(newBody, newName, {
         memory: { role: "harvester" },
       });
+    } else if (
+      counts.upgrader < 1 &&
+      spawn.room.controller.ticksToDowngrade < 4000
+    ) {
+      // 紧急救援：如果没有 Upgrader 且即将降级，优先孵化 Upgrader (插队到 Hauler 之前)
+      const newBody = getBody(energyToUse, "upgrader");
+      const newName = "Upgrader" + Game.time;
+      console.log("🚨 紧急孵化救援升级者: " + newName + " (" + newBody + ")");
+      spawn.spawnCreep(newBody, newName, {
+        memory: { role: "upgrader" },
+      });
     } else if (counts.hauler < TARGETS.hauler) {
       // 只有当有 Harvester 时才孵化 Hauler
       const newBody = getBody(energyToUse, "hauler");

@@ -72,8 +72,14 @@ const populationModule = {
     }
 
     // 4. Upgrader:
+    // 紧急状态检查：如果控制器即将降级 (< 4000 ticks)，强制提升 Upgrader 优先级
+    if (room.controller && room.controller.ticksToDowngrade < 4000) {
+      console.log("🚨 紧急警报：控制器即将降级！进入救援模式！");
+      targets.upgrader = 3;
+      targets.builder = 0; // 暂停基建，全力救火
+    }
     // 如果有 Container 正在建造，减少 Upgrader 以节省能量和 Spawn 队列
-    if (containerSites.length > 0) {
+    else if (containerSites.length > 0) {
       targets.upgrader = 1;
     } else {
       // 正常模式：根据能量富裕程度调整
