@@ -32,6 +32,9 @@ description: "管理 Creep 的计划生育策略。在调整人口数量、优�
   - **积压检测**：如果 Container 能量 > 1000，+1 名；> 1800，+2 名。
   - **掉落检测**：如果地面掉落能量 > 500，+1 名。
   - **等待惩罚**：如果 Upgrader 平均等待时间 > 20 ticks，全局 +1 名。
+- **动态再平衡 (Dynamic Rebalancing)**：
+  - 每 5 ticks 系统会自动检查所有 Source 的供需情况。
+  - 如果发现某个 Source 严重积压（需求高）而另一个 Source 运力过剩，系统会**强制调拨**多余的 Hauler 进行跨线支援。
 - **上限**：设定硬性上限（如 6 名）以防拥堵。
 
 ### 升级者 (Upgrader)
@@ -81,13 +84,14 @@ description: "管理 Creep 的计划生育策略。在调整人口数量、优�
 
 ### 详细配置表 (Harvester)
 
-| RCL / Energy       | 配置 (Configuration)     | Cost | 说明                                                            |
-| :----------------- | :----------------------- | :--- | :-------------------------------------------------------------- |
-| **RCL 8 (1100+)**  | `[WORK*10, CARRY, MOVE]` | 1100 | 10 WORK 极限开采，为 Power 强化预留空间。                       |
-| **RCL 6-7 (900+)** | `[WORK*8, CARRY, MOVE]`  | 900  | 8 WORK，单 tick 产出 16 能量。                                  |
-| **RCL 5 (700+)**   | `[WORK*6, CARRY, MOVE]`  | 700  | 6 WORK，完全饱和 Source (12/tick > 10/tick)，允许少量移动损耗。 |
-| **RCL 2-4 (500+)** | `[WORK*4, CARRY, MOVE]`  | 500  | 4 WORK，RCL 2 即可达成，效率极高。                              |
-| **RCL 1-2 (300+)** | `[WORK*2, CARRY, MOVE]`  | 300  | 基础启动配置。                                                  |
+| RCL / Energy          | 配置 (Configuration)     | Cost | 说明                                                            |
+| :-------------------- | :----------------------- | :--- | :-------------------------------------------------------------- |
+| **RCL 8 (1100+)**     | `[WORK*10, CARRY, MOVE]` | 1100 | 10 WORK 极限开采，为 Power 强化预留空间。                       |
+| **RCL 6-7 (900+)**    | `[WORK*8, CARRY, MOVE]`  | 900  | 8 WORK，单 tick 产出 16 能量。                                  |
+| **RCL 5 (700+)**      | `[WORK*6, CARRY, MOVE]`  | 700  | 6 WORK，完全饱和 Source (12/tick > 10/tick)，允许少量移动损耗。 |
+| **RCL 2-4 (500+)**    | `[WORK*4, CARRY, MOVE]`  | 500  | 4 WORK，RCL 2 即可达成，效率极高。                              |
+| **Transition (400+)** | `[WORK*3, CARRY, MOVE]`  | 400  | 平滑过渡配置，填补 300-500 的空白，提升紧急恢复效率。           |
+| **RCL 1-2 (300+)**    | `[WORK*2, CARRY, MOVE]`  | 300  | 基础启动配置。                                                  |
 
 ### 紧急恢复配置 (Emergency Recovery)
 

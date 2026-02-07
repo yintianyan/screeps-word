@@ -27,6 +27,7 @@ description: "智能建筑规划系统，用于自动分析房间布局并规划
 ## 4. 选址算法 (Positioning)
 *   优先选择地形为 Plain (平原) 的位置。
 *   避开墙壁 (Wall) 和已有建筑。
+*   **安全排除 (Safety Exclusion)**: 强制排除中心点（Source/Spawn/Controller）坐标本身，防止将工地规划在不可建造的实体上。
 *   支持 **Bias (偏向)** 参数：例如 Spawn 中转仓会倾向于靠近 Center Pos 的方向建造，缩短运输路径。
 
 ## 5. 异常处理
