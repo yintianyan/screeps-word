@@ -96,10 +96,13 @@ const moveModule = {
     if (creep.memory._move.stuckCount >= 2) {
       // 1. 尝试交换 (Swap)
       // 如果前方仅仅是因为被自己人挡住，且对方也可以移动，直接交换位置
+      // 注意：findPathTo 开销较大，仅在堵塞时调用
       const path = creep.pos.findPathTo(target, {
         ignoreCreeps: true,
         range: opts.range || 1,
+        maxRooms: 1, // 限制范围，减少开销
       });
+
       if (path.length > 0) {
         const nextStep = path[0];
         const obstacle = creep.room.lookForAt(
@@ -108,10 +111,14 @@ const moveModule = {
           nextStep.y,
         )[0];
 
-        if (obstacle && obstacle.my) {
+        // 只有当障碍物是己方 Creep 且未疲劳时才交换
+        if (obstacle && obstacle.my && obstacle.fatigue === 0) {
           obstacle.move(obstacle.pos.getDirectionTo(creep));
           creep.move(creep.pos.getDirectionTo(obstacle));
+
+          // 交换成功，重置计数并跳过常规 moveTo
           creep.memory._move.stuckCount = 0;
+          creep.say("🔀 swap");
           return;
         }
       }
@@ -122,18 +129,44 @@ const moveModule = {
       moveOpts.costCallback = function (roomName, costMatrix) {
         if (roomName === creep.room.name) {
           const trafficMatrix = TrafficManager.getTrafficMatrix(creep.room);
-          // 这里我们只返回拥堵矩阵，车道偏好在紧急避让时可以暂时忽略，或者需要合并
-          // 为了简单，紧急避让时优先考虑 trafficMatrix (避开人)
           return trafficMatrix;
         }
       };
       moveOpts.reusePath = 0; // 重新寻路
       moveOpts.visualizePathStyle = { stroke: "#ff0000", lineStyle: "dotted" };
 
-      creep.say("🔀 divert");
+      // 如果卡住很久 (>5 ticks)，说明重寻路也找不到路 (死胡同或被包围)
+      // 尝试随机移动一步，打破僵局
+      if (creep.memory._move.stuckCount > 5) {
+        const directions = [
+          TOP,
+          TOP_RIGHT,
+          RIGHT,
+          BOTTOM_RIGHT,
+          BOTTOM,
+          BOTTOM_LEFT,
+          LEFT,
+          TOP_LEFT,
+        ];
+        const randomDir =
+          directions[Math.floor(Math.random() * directions.length)];
+        if (creep.move(randomDir) === OK) {
+          creep.memory._move.stuckCount = 0;
+          creep.say("🎲 panic");
+          return;
+        }
+      }
+
+      creep.say("🛡️ avoid");
     }
 
-    creep.moveTo(target, moveOpts);
+    const result = creep.moveTo(target, moveOpts);
+
+    // 如果 moveTo 彻底失败 (无路可走)，且我们被卡住了
+    if (result === ERR_NO_PATH && creep.memory._move.stuckCount > 0) {
+      creep.say("🚫 no path");
+      // 下个 tick 会触发 panic 随机移动
+    }
   },
 
   /**
@@ -187,7 +220,8 @@ const moveModule = {
             (s) =>
               s.structureType !== STRUCTURE_CONTAINER &&
               s.structureType !== STRUCTURE_RAMPART &&
-              (OBSTACLE_OBJECT_TYPES.includes(s.structureType) ||
+              ((typeof OBSTACLE_OBJECT_TYPES !== "undefined" &&
+                OBSTACLE_OBJECT_TYPES.includes(s.structureType)) ||
                 s.structureType === "constructedWall"), // constructedWall 通常在 OBSTACLE_OBJECT_TYPES 中
           )
         )
