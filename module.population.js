@@ -1,4 +1,5 @@
 const Cache = require("core.cache");
+const Lifecycle = require("module.lifecycle");
 
 const populationModule = {
   // === 配置区域 (Config) ===
@@ -42,7 +43,9 @@ const populationModule = {
     const sourceCount = sources.length;
 
     // Use Cache to get creeps by role (Tick Cached)
-    const haulers = Cache.getCreepsByRole(room, "hauler");
+    // Filter out non-operational creeps (dying ones) to avoid double counting
+    const allHaulers = Cache.getCreepsByRole(room, "hauler");
+    const haulers = allHaulers.filter((c) => Lifecycle.isOperational(c));
 
     if (haulers.length > 0) {
       targets.harvester = sourceCount * 1;
@@ -146,8 +149,12 @@ const populationModule = {
       room.find(FIND_SOURCES),
     );
 
+    // 检查是否有全局等待情况 (Upgrader/Builder Starvation)
+    // 如果 Upgrader 等待时间过长，说明运力不足，给每个 Source 都增加配额
     let globalBoost = 0;
-    const upgraders = Cache.getCreepsByRole(room, "upgrader");
+    const upgraders = Cache.getCreepsByRole(room, "upgrader").filter((c) =>
+      Lifecycle.isOperational(c),
+    );
 
     const avgIdle =
       upgraders.reduce((sum, c) => sum + (c.memory.idleTicks || 0), 0) /
@@ -209,8 +216,9 @@ const populationModule = {
    */
   rebalanceHaulers: function (room) {
     const needs = this.getHaulerNeeds(room);
+    // Only rebalance healthy haulers
     const haulers = Cache.getCreepsByRole(room, "hauler").filter(
-      (c) => c.ticksToLive > 100,
+      (c) => c.ticksToLive > 100 && Lifecycle.isOperational(c),
     );
 
     // ... (Rest of logic is same, but using cached haulers)

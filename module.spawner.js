@@ -1,4 +1,5 @@
 const populationModule = require("module.population");
+const Lifecycle = require("module.lifecycle");
 
 /**
  * Module: Spawner
@@ -21,11 +22,55 @@ const spawnerModule = {
             return;
         }
 
-        // Count creeps (Using Cache would be better, but main.js used manual count)
-        // Let's rely on populationModule.calculateTargets which uses Cache internally now
-        
-        // We need current counts to compare with targets
-        // Let's implement a quick count using Game.creeps (global) or room.find
+        // 1. Process Lifecycle Replacement Requests (Highest Priority)
+        const lifecycleRequests = Lifecycle.getRequests();
+        let bestRequest = null;
+        let requestCreepName = null;
+
+        for (const name in lifecycleRequests) {
+            const req = lifecycleRequests[name];
+            // Filter requests for this room only? (Assuming global memory, need to check creep room)
+            // Ideally we check if the dying creep belongs to this room
+            const dyingCreep = Game.creeps[name];
+            if (dyingCreep && dyingCreep.room.name === room.name) {
+                if (!bestRequest || req.priority > bestRequest.priority) {
+                    bestRequest = req;
+                    requestCreepName = name;
+                }
+            }
+        }
+
+        if (bestRequest) {
+            const energyAvailable = room.energyAvailable;
+            const energyCapacity = room.energyCapacityAvailable;
+            
+            // Determine energy budget (Emergency if harvester)
+            const isEmergency = bestRequest.role === 'harvester' && 
+                                room.find(FIND_MY_CREEPS, {filter: c => c.memory.role === 'harvester'}).length <= 1;
+            const energyToUse = isEmergency ? energyAvailable : energyCapacity;
+
+            const body = this.getBody(energyToUse, bestRequest.role);
+            const newName = bestRequest.role.charAt(0).toUpperCase() + bestRequest.role.slice(1) + Game.time;
+            
+            // Inherit memory but reset operational state
+            const newMemory = bestRequest.baseMemory;
+            newMemory.predecessorId = requestCreepName; // Link to old creep
+            delete newMemory.hauling; // Reset state
+            delete newMemory.upgrading;
+            delete newMemory.building;
+            delete newMemory._move; // Reset move cache
+
+            const result = spawn.spawnCreep(body, newName, { memory: newMemory });
+            
+            if (result === OK) {
+                console.log(`[Spawner] ♻️ Executing Lifecycle Replacement: ${requestCreepName} -> ${newName}`);
+                Lifecycle.notifySpawn(requestCreepName, newName);
+                return; // Done for this tick
+            }
+        }
+
+        // 2. Standard Population Check
+        // Count creeps using Lifecycle.isOperational to avoid double counting replacing creeps
         const creeps = room.find(FIND_MY_CREEPS);
         const counts = {
             harvester: 0,
@@ -35,10 +80,11 @@ const spawnerModule = {
         };
         
         creeps.forEach(c => {
-             // Pre-spawning check
-             if (!c.spawning && c.ticksToLive < 100) return;
-             if (counts[c.memory.role] !== undefined) {
-                 counts[c.memory.role]++;
+             // Use Lifecycle to determine if this creep counts as "Active"
+             if (Lifecycle.isOperational(c)) {
+                 if (counts[c.memory.role] !== undefined) {
+                     counts[c.memory.role]++;
+                 }
              }
         });
 

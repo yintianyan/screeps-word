@@ -7,11 +7,13 @@ const monitorModule = require("module.monitor");
 const spawnerModule = require("module.spawner");
 const creepsModule = require("module.creeps");
 const trafficModule = require("module.traffic");
+const Lifecycle = require("module.lifecycle");
 
 // === Register Modules ===
 
 // 1. Core Logic (Population & Spawning) - Room Level
 Kernel.register("population", populationModule); // Calculation only
+Kernel.register("lifecycle", Lifecycle); // Lifecycle monitor
 Kernel.register("spawner", spawnerModule); // Spawning execution
 
 // 2. Planning & Building - Room Level

@@ -8,6 +8,7 @@ setupGlobal();
 
 const populationModule = require('../module.population');
 const Cache = require('../core.cache');
+const Lifecycle = require('../module.lifecycle');
 
 function assert(condition, message) {
     if (!condition) {
@@ -27,6 +28,9 @@ function runTests() {
 
     // Test 3: Population Logic (High Load)
     testPopulationHighLoad();
+
+    // Test 4: Lifecycle Logic
+    testLifecycle();
 
     console.log("\nAll Tests Passed!");
 }
@@ -95,12 +99,49 @@ function testPopulationHighLoad() {
 
     const targets = populationModule.calculateTargets(room);
     
-    // Expect: 2 Harvesters (User req), increased Haulers due to backlog
-    assert(targets.harvester === 2, "Should have 2 harvesters per source");
+    // Expect: 1 Harvester (per Source)
+    assert(targets.harvester === 1, "Should have 1 harvester per source");
+    // Expect: Increased Haulers due to backlog
     assert(targets.hauler >= 2, "Should increase haulers due to backlog > 1800");
 
     // Restore
     Cache.getStructures = originalGetStructures;
+}
+
+function testLifecycle() {
+    console.log("\n[Test] Lifecycle Management");
+    Lifecycle.initMemory();
+    
+    // 1. Test Monitor
+    // Create a dying creep
+    const dyingCreep = new MockCreep("dying_harvester", "harvester");
+    dyingCreep.ticksToLive = 140; // < 150 (10%)
+    
+    // Mock Game.creeps
+    global.Game.creeps = { "dying_harvester": dyingCreep };
+    
+    // Run Monitor
+    Lifecycle.monitorCreeps();
+    
+    // Check Registry
+    assert(Memory.lifecycle.registry["dying_harvester"] === 'PRE_SPAWNING', "Dying creep should be marked PRE_SPAWNING");
+    
+    // Check Request
+    assert(Memory.lifecycle.requests["dying_harvester"] !== undefined, "Should create spawn request");
+    assert(Memory.lifecycle.requests["dying_harvester"].role === "harvester", "Request role should match");
+
+    // 2. Test Operational Check
+    const isOp = Lifecycle.isOperational(dyingCreep);
+    assert(isOp === false, "PRE_SPAWNING creep should not be operational");
+
+    // 3. Test Spawn Notification
+    Lifecycle.notifySpawn("dying_harvester", "new_harvester");
+    assert(Memory.lifecycle.requests["dying_harvester"] === undefined, "Request should be cleared after spawn");
+    
+    // 4. Test Cleanup
+    delete global.Game.creeps["dying_harvester"]; // Creep dies
+    Lifecycle.cleanupMemory();
+    assert(Memory.lifecycle.registry["dying_harvester"] === undefined, "Dead creep should be removed from registry");
 }
 
 // Run
