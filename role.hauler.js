@@ -359,7 +359,18 @@ const roleHauler = {
               visualizePathStyle: { stroke: "#ffaa00" },
             });
           } else {
-            creep.say("⏳ waiting");
+            // 到了位置，虽然 Container 没货，但如果旁边有 Harvester 且有能量，我应该等它给我
+            // 否则才算是真正的 waiting
+            const nearbyHarvester = creep.pos.findInRange(FIND_MY_CREEPS, 1, {
+              filter: (c) =>
+                c.memory.role === "harvester" && c.store[RESOURCE_ENERGY] > 0,
+            })[0];
+
+            if (nearbyHarvester) {
+              creep.say("🤲 gimme"); // 提示 Harvester 给我能量
+            } else {
+              creep.say("⏳ waiting");
+            }
           }
         }
 

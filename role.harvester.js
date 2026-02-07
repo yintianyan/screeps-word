@@ -131,7 +131,22 @@ const roleHarvester = {
               return; // 还没到
             }
 
-            // 1. 优先把能量存入附近的 Container (如果满了且有 Container)
+            // 1. 优先把能量给身边的 Hauler (直接对接，效率最高)
+            // 只要身上有一定能量 (>40)，且身边有不满的 Hauler，就直接给
+            // 这避免了 "Harvester -> Container -> Hauler" 的中间损耗，也解决了 Container 被踩住的问题
+            if (creep.store[RESOURCE_ENERGY] >= 40) {
+              const nearbyHauler = creep.pos.findInRange(FIND_MY_CREEPS, 1, {
+                filter: (c) =>
+                  c.memory.role === "hauler" && c.store.getFreeCapacity() > 0,
+              })[0];
+              if (nearbyHauler) {
+                creep.transfer(nearbyHauler, RESOURCE_ENERGY);
+                creep.say("⚡ give");
+                return; // 给货完成，结束本 tick
+              }
+            }
+
+            // 2. 其次把能量存入附近的 Container
             if (creep.store.getFreeCapacity() === 0) {
               // 优化查找逻辑：
               // 1. 先看之前找到的 container 变量（通常是脚下的或者最近的）
@@ -159,18 +174,6 @@ const roleHarvester = {
                   creep.say("📦 store");
                   return; // 存货完成，结束本 tick
                 }
-              }
-            }
-
-            // 2. 顺手把能量给身边的 Hauler (如果正好贴着，且自己快满了)
-            if (creep.store.getFreeCapacity() < 10) {
-              const nearbyHauler = creep.pos.findInRange(FIND_MY_CREEPS, 1, {
-                filter: (c) =>
-                  c.memory.role === "hauler" && c.store.getFreeCapacity() > 0,
-              })[0];
-              if (nearbyHauler) {
-                creep.transfer(nearbyHauler, RESOURCE_ENERGY);
-                return; // 给货完成，结束本 tick
               }
             }
 
