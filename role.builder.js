@@ -52,6 +52,9 @@ const roleBuilder = {
           moveModule.smartMove(creep, target, {
             visualizePathStyle: { stroke: "#ff0000" },
           });
+        } else {
+          // 到了工作位置，如果站在路上，尝试挪到旁边 (Range 3)
+          moveModule.parkOffRoad(creep, target, 3);
         }
         return; // 紧急任务，必须先做
       }
@@ -101,6 +104,8 @@ const roleBuilder = {
             moveModule.smartMove(creep, target, {
               visualizePathStyle: { stroke: "#ffffff" },
             });
+          } else {
+            moveModule.parkOffRoad(creep, target, 3);
           }
           return; // 有工地就造，不进行后续的“闲时维修”
         }
@@ -132,6 +137,8 @@ const roleBuilder = {
           moveModule.smartMove(creep, target, {
             visualizePathStyle: { stroke: "#00ff00" },
           });
+        } else {
+          moveModule.parkOffRoad(creep, target, 3);
         }
         return;
       }
@@ -142,6 +149,8 @@ const roleBuilder = {
         moveModule.smartMove(creep, creep.room.controller, {
           visualizePathStyle: { stroke: "#ffffff" },
         });
+      } else {
+        moveModule.parkOffRoad(creep, creep.room.controller, 3);
       }
     } else {
       // === 严格的定点/区域工作模式 ===
@@ -247,7 +256,8 @@ const roleBuilder = {
 
       creep.say("🙏 wait " + creep.memory.waitingTicks);
       // 可以在这里寻找最近的 Construction Site 靠近，以免离得太远
-      // ...
+      // 如果站在路上，尝试移开
+      moveModule.parkOffRoad(creep);
     }
   },
 };
