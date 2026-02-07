@@ -103,24 +103,66 @@ const autoBuilder = {
                 }
 
                 // 4.2 自动建造 General Container (Spawn 附近，作为中转站)
-                // 在 Spawn 附近 Range 2 的位置
-                const spawnNearby = spawn.pos.findInRange(FIND_STRUCTURES, 2, {
-                    filter: s => s.structureType === STRUCTURE_CONTAINER
-                });
-                const spawnNearbySites = spawn.pos.findInRange(FIND_MY_CONSTRUCTION_SITES, 2, {
-                    filter: s => s.structureType === STRUCTURE_CONTAINER
-                });
-                
-                if (spawnNearby.length === 0 && spawnNearbySites.length === 0) {
-                    // 简单的找个空地
-                    const targetX = spawn.pos.x;
-                    const targetY = spawn.pos.y + 2; // 下方两格
-                    // 检查地形
-                    const terrain = room.getTerrain().get(targetX, targetY);
-                    if (terrain !== TERRAIN_MASK_WALL) {
-                        room.createConstructionSite(targetX, targetY, STRUCTURE_CONTAINER);
+            // 在 Spawn 附近 Range 2 的位置
+            const spawnNearby = spawn.pos.findInRange(FIND_STRUCTURES, 2, {
+                filter: s => s.structureType === STRUCTURE_CONTAINER
+            });
+            const spawnNearbySites = spawn.pos.findInRange(FIND_MY_CONSTRUCTION_SITES, 2, {
+                filter: s => s.structureType === STRUCTURE_CONTAINER
+            });
+            
+            if (spawnNearby.length === 0 && spawnNearbySites.length === 0) {
+                // 智能选择最佳位置 (类似 Source Container)
+                let bestPos = null;
+                let bestScore = -9999;
+
+                // 遍历 Spawn 周围 2 格范围
+                for (let x = -2; x <= 2; x++) {
+                    for (let y = -2; y <= 2; y++) {
+                        // 排除 Range 1 (留给 Creep 走路和孵化)
+                        if (Math.abs(x) <= 1 && Math.abs(y) <= 1) continue;
+
+                        const posX = spawn.pos.x + x;
+                        const posY = spawn.pos.y + y;
+                        
+                        // 检查地形
+                        const terrain = room.getTerrain().get(posX, posY);
+                        if (terrain === TERRAIN_MASK_WALL) continue;
+
+                        const pos = new RoomPosition(posX, posY, room.name);
+                        let score = 0;
+
+                        // 1. 地形分
+                        if (terrain === 0) score += 5; // Plain
+                        if (terrain === TERRAIN_MASK_SWAMP) score -= 5; // Swamp
+
+                        // 2. 可达性分 (周围有多少个非墙格子)
+                        let openNeighbors = 0;
+                        for (let dx = -1; dx <= 1; dx++) {
+                            for (let dy = -1; dy <= 1; dy++) {
+                                if (dx === 0 && dy === 0) continue;
+                                if (room.getTerrain().get(posX + dx, posY + dy) !== TERRAIN_MASK_WALL) {
+                                    openNeighbors++;
+                                }
+                            }
+                        }
+                        score += openNeighbors;
+
+                        // 3. 距离分 (距离 Controller 越近越好，方便 Upgrader 取货? 或者距离 Source 均衡?)
+                        // 这里我们希望它离 Spawn 近，且方便进出。
+                        // 稍微偏向房间中心或空旷地带
+                        
+                        if (score > bestScore) {
+                            bestScore = score;
+                            bestPos = pos;
+                        }
                     }
                 }
+
+                if (bestPos) {
+                    room.createConstructionSite(bestPos.x, bestPos.y, STRUCTURE_CONTAINER);
+                }
+            }
 
                 // 4.3 清理多余的 Container 工地
                 // 如果 Source 附近已经有 Container 了，就移除该 Source 附近所有的 Container 工地，防止重复建造

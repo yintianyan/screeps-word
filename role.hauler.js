@@ -47,7 +47,25 @@ const roleHauler = {
         });
       }
 
-      // 3. 还没有，就放 Storage (如果有)
+      // 3. 填充 Spawn Container (General Container)
+      // 这是给 Builder/Upgrader 用的缓存，也是 Spawn 的后备能源
+      if (targets.length === 0) {
+        // 找到 Spawn 附近的 Container (排除 Mining Container 和 Controller Container)
+        // 简单判定：Range 3 以内
+        const spawn = creep.room.find(FIND_MY_SPAWNS)[0];
+        if (spawn) {
+          const spawnContainers = spawn.pos.findInRange(FIND_STRUCTURES, 3, {
+            filter: (s) =>
+              s.structureType === STRUCTURE_CONTAINER &&
+              s.store.getFreeCapacity(RESOURCE_ENERGY) > 0,
+          });
+          if (spawnContainers.length > 0) {
+            targets = spawnContainers;
+          }
+        }
+      }
+
+      // 4. 还没有，就放 Storage (如果有)
       if (targets.length === 0) {
         targets = creep.room.find(FIND_STRUCTURES, {
           filter: (structure) => {
@@ -59,7 +77,7 @@ const roleHauler = {
         });
       }
 
-      // 4. 如果还是没有，就填充 "非 Mining" 的 Container (例如 Controller Container 或 Spawn Container)
+      // 5. 如果还是没有，就填充其他 Container (例如 Controller Container)
       // 注意：必须排除 Mining Container，否则会把能量运回 Source
       if (targets.length === 0) {
         targets = creep.room.find(FIND_STRUCTURES, {
