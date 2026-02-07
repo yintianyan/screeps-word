@@ -23,31 +23,22 @@ const roleUpgrader = {
         });
       }
     } else {
-      // === 严格的定点工作模式 ===
-      // Upgrader 不再四处寻找能量，而是只从 Controller 附近的 Container 取货
-      // 如果没有，就原地等待 Hauler 喂养
+      // 1. 寻找最近的 Container 或 Storage
+      // 优先从 Container/Storage 取货，不再死守 Controller 旁边，而是就近提取
+      const target = creep.pos.findClosestByPath(FIND_STRUCTURES, {
+        filter: (s) =>
+          (s.structureType === STRUCTURE_CONTAINER ||
+            s.structureType === STRUCTURE_STORAGE) &&
+          s.store[RESOURCE_ENERGY] > 0,
+      });
 
-      // 1. 优先从 Controller Container 取能量 (距离 Controller Range 3 以内的 Container)
-      const controllerContainer = creep.room.controller.pos.findInRange(
-        FIND_STRUCTURES,
-        3,
-        {
-          filter: (s) =>
-            s.structureType === STRUCTURE_CONTAINER &&
-            s.store[RESOURCE_ENERGY] > 0,
-        },
-      )[0];
-
-      if (controllerContainer) {
-        // 找到了 Container，清除请求
+      if (target) {
+        // 找到了目标，清除请求
         delete creep.memory.requestingEnergy;
         delete creep.memory.waitingTicks;
 
-        if (
-          creep.withdraw(controllerContainer, RESOURCE_ENERGY) ==
-          ERR_NOT_IN_RANGE
-        ) {
-          moveModule.smartMove(creep, controllerContainer, {
+        if (creep.withdraw(target, RESOURCE_ENERGY) == ERR_NOT_IN_RANGE) {
+          moveModule.smartMove(creep, target, {
             visualizePathStyle: { stroke: "#ffaa00" },
           });
         }
