@@ -5,7 +5,7 @@ const populationModule = {
   config: {
     // 角色基础配比
     ratios: {
-      harvesterPerSource: 2, // 每个 Source 2 个 Harvester
+      harvesterPerSource: 1, // 每个 Source 1 个 Harvester (定点挖掘)
       haulerBaseCount: 1, // 基础 Hauler 数量
     },
     // 角色上限
@@ -45,7 +45,7 @@ const populationModule = {
     const haulers = Cache.getCreepsByRole(room, "hauler");
 
     if (haulers.length > 0) {
-      targets.harvester = sourceCount * 2;
+      targets.harvester = sourceCount * 1;
     } else {
       targets.harvester = sourceCount;
     }
