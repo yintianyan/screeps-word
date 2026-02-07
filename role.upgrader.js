@@ -37,12 +37,21 @@ const roleUpgrader = {
       }
 
       if (shouldUpgrade) {
-        if (
-          creep.upgradeController(creep.room.controller) == ERR_NOT_IN_RANGE
-        ) {
-          moveModule.smartMove(creep, creep.room.controller, {
-            visualizePathStyle: { stroke: "#ffffff" },
-          });
+        const controller = creep.room.controller;
+        creep.upgradeController(controller);
+
+        const range = creep.pos.getRangeTo(controller);
+        // 尝试靠近控制器 (Range 1)，但如果在工作范围内 (Range <= 3) 且已经卡住，则原地定居避免反复 Swap
+        if (range > 1) {
+          const stuck = creep.memory._move ? creep.memory._move.stuckCount : 0;
+          if (range > 3 || stuck < 2) {
+            moveModule.smartMove(creep, controller, {
+              range: 1,
+              visualizePathStyle: { stroke: "#ffffff" },
+            });
+          } else {
+            creep.say("🛑 settle");
+          }
         }
       }
     } else {
