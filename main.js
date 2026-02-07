@@ -112,6 +112,10 @@ module.exports.loop = function () {
         // 4 WORK (400) + CARRY (50) + MOVE (50) = 500
         if (capacity >= 500) return [WORK, WORK, WORK, WORK, CARRY, MOVE];
 
+        // 平滑过渡 (Energy 400-450): 3 WORK (300) + CARRY (50) + MOVE (50) = 400
+        // 这填补了 300 和 500 之间的空白，充分利用紧急能量
+        if (capacity >= 400) return [WORK, WORK, WORK, CARRY, MOVE];
+
         // RCL 1-2 Transition (Energy 300-450)
         // 3 WORK (300) - 无法移动
         // 2 WORK (200) + CARRY (50) + MOVE (50) = 300
