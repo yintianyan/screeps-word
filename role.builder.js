@@ -87,10 +87,8 @@ const roleBuilder = {
         delete creep.memory.requestingEnergy;
         delete creep.memory.waitingTicks;
 
-        if (
-          creep.withdraw(creep.room.storage, RESOURCE_ENERGY) ==
-          ERR_NOT_IN_RANGE
-        ) {
+        const result = creep.withdraw(creep.room.storage, RESOURCE_ENERGY);
+        if (result == ERR_NOT_IN_RANGE) {
           moveModule.smartMove(creep, creep.room.storage, {
             visualizePathStyle: { stroke: "#ffaa00" },
           });
@@ -110,9 +108,8 @@ const roleBuilder = {
         delete creep.memory.requestingEnergy;
         delete creep.memory.waitingTicks;
 
-        if (
-          creep.withdraw(nearbyContainer, RESOURCE_ENERGY) == ERR_NOT_IN_RANGE
-        ) {
+        const result = creep.withdraw(nearbyContainer, RESOURCE_ENERGY);
+        if (result == ERR_NOT_IN_RANGE) {
           moveModule.smartMove(creep, nearbyContainer, {
             visualizePathStyle: { stroke: "#ffaa00" },
           });
