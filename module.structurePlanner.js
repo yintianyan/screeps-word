@@ -136,8 +136,8 @@ const structurePlanner = {
 
         for (let x = centerPos.x - range; x <= centerPos.x + range; x++) {
             for (let y = centerPos.y - range; y <= centerPos.y + range; y++) {
-                // 排除中心点本身 (如果是 Source/Spawn/Controller 所在位置，通常不能造)
-                if (x === centerPos.x && y === centerPos.y && type !== 'SourceMining') continue;
+                // 排除中心点本身 (Source/Spawn/Controller 都是实体，不可重叠建造)
+                if (x === centerPos.x && y === centerPos.y) continue;
                 
                 const pos = new RoomPosition(x, y, room.name);
                 const terrain = room.getTerrain().get(x, y);
