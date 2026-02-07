@@ -355,6 +355,8 @@ const roleHauler = {
         if (spawn) {
           if (!creep.pos.inRangeTo(spawn, 3)) {
             moveModule.smartMove(creep, spawn);
+          } else {
+            moveModule.parkOffRoad(creep, spawn, 3);
           }
         }
       }
@@ -490,6 +492,8 @@ const roleHauler = {
               creep.say("🤲 gimme"); // 提示 Harvester 给我能量
             } else {
               creep.say("⏳ waiting");
+              // 如果站在路上，尝试移到路边（但在 Container 范围内）
+              moveModule.parkOffRoad(creep, targetContainer, 1);
             }
           }
         }

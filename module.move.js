@@ -135,6 +135,81 @@ const moveModule = {
 
     creep.moveTo(target, moveOpts);
   },
+
+  /**
+   * Check if creep is standing on a road
+   * @param {Creep} creep
+   * @returns {boolean}
+   */
+  isOnRoad: function (creep) {
+    return creep.pos
+      .lookFor(LOOK_STRUCTURES)
+      .some((s) => s.structureType === STRUCTURE_ROAD);
+  },
+
+  /**
+   * Move off the road to a random adjacent walkable tile
+   * Keeps within range of anchor if provided
+   * @param {Creep} creep
+   * @param {RoomPosition|Object} anchor (Optional) Target to stay near
+   * @param {number} range (Optional) Max range from anchor
+   */
+  parkOffRoad: function (creep, anchor = null, range = 1) {
+    if (!this.isOnRoad(creep)) return; // Already off road
+
+    // Find valid spot
+    const terrain = creep.room.getTerrain();
+    const adjacent = [];
+
+    for (let x = -1; x <= 1; x++) {
+      for (let y = -1; y <= 1; y++) {
+        if (x === 0 && y === 0) continue;
+        const targetX = creep.pos.x + x;
+        const targetY = creep.pos.y + y;
+
+        // Boundary check
+        if (targetX < 1 || targetX > 48 || targetY < 1 || targetY > 48)
+          continue;
+
+        const pos = new RoomPosition(targetX, targetY, creep.room.name);
+
+        // Check terrain (Wall)
+        if (terrain.get(targetX, targetY) === TERRAIN_MASK_WALL) continue;
+
+        // Check structures (Road or Obstacle)
+        const structures = pos.lookFor(LOOK_STRUCTURES);
+        // Avoid Roads
+        if (structures.some((s) => s.structureType === STRUCTURE_ROAD))
+          continue;
+        // Avoid Obstacles (Manual check for common ones or trust moveTo logic? Here we need manual check)
+        if (
+          structures.some(
+            (s) =>
+              s.structureType !== STRUCTURE_CONTAINER &&
+              s.structureType !== STRUCTURE_RAMPART &&
+              (OBSTACLE_OBJECT_TYPES.includes(s.structureType) ||
+                s.structureType === "constructedWall"), // constructedWall is in OBSTACLE_OBJECT_TYPES usually
+          )
+        )
+          continue;
+
+        // Check creeps
+        if (pos.lookFor(LOOK_CREEPS).length > 0) continue;
+
+        // Check anchor range
+        if (anchor && !pos.inRangeTo(anchor, range)) continue;
+
+        adjacent.push(pos);
+      }
+    }
+
+    if (adjacent.length > 0) {
+      // Pick random or first
+      const target = adjacent[Math.floor(Math.random() * adjacent.length)];
+      creep.move(creep.pos.getDirectionTo(target));
+      creep.say("🚷 park");
+    }
+  },
 };
 
 module.exports = moveModule;

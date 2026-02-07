@@ -51,7 +51,12 @@ const roleUpgrader = {
             });
           } else {
             creep.say("🛑 settle");
+            // 虽然停下了，但如果踩在路上，还是得挪挪窝
+            moveModule.parkOffRoad(creep, controller, 3);
           }
+        } else {
+          // 已经到达 Range 1 (最佳位置)，检查是否踩在路上
+          moveModule.parkOffRoad(creep, controller, 1);
         }
       }
     } else {
@@ -101,6 +106,7 @@ const roleUpgrader = {
         // 到了位置，原地等待
         creep.say("🙏 wait " + creep.memory.waitingTicks);
         // 可以在这里做一个简单的动画或者记录等待时间
+        moveModule.parkOffRoad(creep, creep.room.controller, 3);
       }
     }
   },
