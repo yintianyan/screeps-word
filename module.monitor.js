@@ -66,9 +66,51 @@ const monitorModule = {
             row += 0.8;
         });
 
-        // 3. 异常警告
-        // 检查是否有 Role 缺失
-        if (stats.harvester.count === 0) {
+        // 3. 矿源运输状态 (Transport Status)
+        row += 1.5;
+        visual.text(`🚚 Transport Lines:`, x, row, { align: 'left', font: 0.7, color: '#00ffff' });
+        row += 0.8;
+        
+        const sources = room.find(FIND_SOURCES);
+        const populationModule = require('module.population');
+        const haulerNeeds = populationModule.getHaulerNeeds(room);
+        const haulers = room.find(FIND_MY_CREEPS, { filter: c => c.memory.role === 'hauler' });
+        
+        // 统计当前每个 Source 的 Hauler 数量
+        const currentCounts = {};
+        haulers.forEach(c => {
+            if (c.memory.sourceId) {
+                currentCounts[c.memory.sourceId] = (currentCounts[c.memory.sourceId] || 0) + 1;
+            }
+        });
+
+        sources.forEach(source => {
+            const container = source.pos.findInRange(FIND_STRUCTURES, 2, { filter: s => s.structureType === STRUCTURE_CONTAINER })[0];
+            const energy = container ? container.store[RESOURCE_ENERGY] : 0;
+            const capacity = container ? container.store.getCapacity() : 0;
+            const needed = haulerNeeds[source.id] || 0;
+            const current = currentCounts[source.id] || 0;
+            
+            // 颜色逻辑：积压红，正常绿，无容器灰
+            let color = '#00ff00';
+            if (energy > 1800) color = '#ff0000';
+            else if (energy > 1000) color = '#ffff00';
+            if (!container) color = '#555555';
+
+            visual.text(`Src ${source.id.substr(-4)}:`, x, row, { align: 'left', font: 0.5, color: '#ffffff' });
+            visual.text(`🔋 ${energy}/${capacity}`, x + 2.5, row, { align: 'left', font: 0.5, color: color });
+            
+            // 搬运工状态：当前/目标
+            let haulerColor = '#ffffff';
+            if (current < needed) haulerColor = '#ff0000'; // 缺人
+            if (current > needed) haulerColor = '#00ffff'; // 富余
+            visual.text(`🚚 ${current}/${needed}`, x + 6, row, { align: 'left', font: 0.5, color: haulerColor });
+            
+            row += 0.6;
+        });
+
+        // 4. 异常警告
+        row += 0.5;
             visual.text(`⚠️ NO HARVESTERS!`, x, row + 1, { align: 'left', color: '#ff0000', font: 0.7 });
         }
         if (stats.hauler.count === 0 && stats.harvester.count > 0) {

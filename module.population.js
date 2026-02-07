@@ -42,24 +42,12 @@ const populationModule = {
     }
 
     // 2. Hauler:
-    // 根据 Harvester 数量和掉落的能量来定
-    // 采用 1:1 配比，确保每个矿点都有专人运输，避免单 Hauler 忙不过来
-    const droppedEnergy = room.find(FIND_DROPPED_RESOURCES, {
-      filter: (r) => r.resourceType === RESOURCE_ENERGY,
-    });
-    const totalDropped = droppedEnergy.reduce(
-      (sum, res) => sum + res.amount,
-      0,
-    );
-
-    // 基础 Hauler：现在 Harvester 翻倍了，但产出没变，所以 Hauler 不需要翻倍
-    // 保持每个 Source 至少有 1 个 Hauler，如果路途遥远或者产出快，可以适当增加
-    // 这里设定为 Source 数量 + 1 (冗余)
-    targets.hauler = sourceCount + this.config.ratios.haulerBaseCount;
-
-    // 如果掉落能量很多 (>1000)，额外增加 Hauler 抢救
-    if (totalDropped > 1000) {
-      targets.hauler += 1;
+    // 采用智能分配算法 (getHaulerNeeds)
+    // 根据每个 Source 的积压情况动态计算需求
+    const haulerNeeds = this.getHaulerNeeds(room);
+    targets.hauler = 0;
+    for (const sourceId in haulerNeeds) {
+      targets.hauler += haulerNeeds[sourceId];
     }
 
     // 限制 Hauler 上限
@@ -115,6 +103,78 @@ const populationModule = {
     }
 
     return targets;
+  },
+
+  /**
+   * 智能计算每个 Source 需要的 Hauler 数量
+   * @param {Room} room
+   * @returns {Object} { sourceId: number }
+   */
+  getHaulerNeeds: function (room) {
+    const needs = {};
+    const sources = room.find(FIND_SOURCES);
+
+    // 检查是否有全局等待情况 (Upgrader/Builder Starvation)
+    // 如果 Upgrader 等待时间过长，说明运力不足，给每个 Source 都增加配额
+    let globalBoost = 0;
+    const upgraders = room.find(FIND_MY_CREEPS, {
+      filter: (c) => c.memory.role === "upgrader",
+    });
+    const avgIdle =
+      upgraders.reduce((sum, c) => sum + (c.memory.idleTicks || 0), 0) /
+      (upgraders.length || 1);
+    if (avgIdle > 20) {
+      console.log(`🚨 运力告急：Upgrader 平均等待 ${avgIdle.toFixed(1)} ticks`);
+      globalBoost = 1;
+    }
+
+    // 手动干预配置
+    const overrides =
+      Memory.config && Memory.config.haulerOverrides
+        ? Memory.config.haulerOverrides
+        : {};
+
+    sources.forEach((source) => {
+      if (overrides[source.id] !== undefined) {
+        needs[source.id] = overrides[source.id];
+        return;
+      }
+
+      let count = this.config.ratios.haulerBaseCount; // 基础值 (1)
+
+      // 1. 检查 Container 积压
+      const container = source.pos.findInRange(FIND_STRUCTURES, 2, {
+        filter: (s) => s.structureType === STRUCTURE_CONTAINER,
+      })[0];
+
+      if (container) {
+        const energy = container.store[RESOURCE_ENERGY];
+        if (energy > 1800) {
+          count += 2; // 严重积压
+        } else if (energy > 1000) {
+          count += 1; // 轻度积压
+        }
+      }
+
+      // 2. 检查掉落能量
+      const dropped = source.pos.findInRange(FIND_DROPPED_RESOURCES, 3, {
+        filter: (r) => r.resourceType === RESOURCE_ENERGY,
+      });
+      const droppedAmount = dropped.reduce((sum, r) => sum + r.amount, 0);
+      if (droppedAmount > 500) {
+        count += 1;
+      }
+
+      // 3. 应用全局加速
+      count += globalBoost;
+
+      // 4. 限制单矿最大搬运工
+      count = Math.min(count, 3);
+
+      needs[source.id] = count;
+    });
+
+    return needs;
   },
 };
 

@@ -175,36 +175,46 @@ module.exports.loop = function () {
       // 只有当有 Harvester 时才孵化 Hauler
       const newBody = getBody(energyToUse, "hauler");
       const newName = "Hauler" + Game.time;
-      console.log("正在孵化新搬运工: " + newName + " (" + newBody + ")");
 
-      // 均衡分配 Source 给 Hauler
-      const sources = spawn.room.find(FIND_SOURCES);
+      // === 智能分配 Source ===
+      const haulerNeeds = populationModule.getHaulerNeeds(spawn.room);
       const haulers = spawn.room.find(FIND_MY_CREEPS, {
         filter: (c) => c.memory.role === "hauler",
       });
 
-      // 统计每个 Source 的 Hauler 数量
-      const sourceCounts = {};
-      sources.forEach((s) => (sourceCounts[s.id] = 0));
+      // 统计现有分布
+      const currentCounts = {};
       haulers.forEach((c) => {
-        if (c.memory.sourceId) {
-          sourceCounts[c.memory.sourceId] =
-            (sourceCounts[c.memory.sourceId] || 0) + 1;
+        if (c.memory.sourceId && (c.ticksToLive > 100 || c.spawning)) {
+          currentCounts[c.memory.sourceId] =
+            (currentCounts[c.memory.sourceId] || 0) + 1;
         }
       });
 
-      // 找最少的
-      let bestSource = sources[0];
-      let minCount = 9999;
-      sources.forEach((s) => {
-        if (sourceCounts[s.id] < minCount) {
-          minCount = sourceCounts[s.id];
-          bestSource = s;
-        }
-      });
+      // 寻找缺口最大的 Source (Need - Current)
+      let bestSourceId = null;
+      let maxDeficit = -999;
 
+      for (const sourceId in haulerNeeds) {
+        const current = currentCounts[sourceId] || 0;
+        const deficit = haulerNeeds[sourceId] - current;
+        if (deficit > maxDeficit) {
+          maxDeficit = deficit;
+          bestSourceId = sourceId;
+        }
+      }
+
+      // 如果没有特别缺的（或者都满了），就随机分配一个或者给第一个
+      if (!bestSourceId) {
+        const sources = spawn.room.find(FIND_SOURCES);
+        bestSourceId = sources[0].id;
+      }
+
+      console.log(
+        `正在孵化新搬运工: ${newName} -> 支援 Source ${bestSourceId} (缺口: ${maxDeficit})`,
+      );
       spawn.spawnCreep(newBody, newName, {
-        memory: { role: "hauler", sourceId: bestSource.id },
+        memory: { role: "hauler", sourceId: bestSourceId },
       });
     } else if (counts.upgrader < TARGETS.upgrader) {
       const newBody = getBody(energyToUse, "upgrader");
