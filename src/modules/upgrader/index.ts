@@ -69,16 +69,21 @@ export default class Upgrader extends Role {
 
         if (hauler) {
             // Only move if not in range to transfer (Range 1)
-            if (!this.creep.pos.inRangeTo(hauler, 1)) {
+            const range = this.creep.pos.getRangeTo(hauler);
+            if (range > 1) {
                  this.move(hauler, { visualizePathStyle: { stroke: "#00ff00", lineStyle: 'dashed', opacity: 0.5 } });
             }
         } else {
             // While waiting, try to harvest if very desperate or early game
-            if (this.creep.room.energyAvailable < 300 || !this.creep.room.storage) {
+            // Only if NO haulers exist
+            const haulersExist = this.creep.room.find(FIND_MY_CREEPS, { filter: (c) => c.memory.role === 'hauler' }).length > 0;
+            if (this.creep.room.energyAvailable < 300 || (!this.creep.room.storage && !haulersExist)) {
                  const source = this.creep.pos.findClosestByPath(FIND_SOURCES);
                  if (source && this.creep.harvest(source) === ERR_NOT_IN_RANGE) {
                    this.move(source);
                  }
+            } else {
+                 this.creep.say("⏳ waiting");
             }
         }
       }

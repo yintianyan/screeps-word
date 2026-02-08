@@ -1,80 +1,80 @@
 ---
 name: "logistics-protocol"
-description: "Defines rules for energy distribution, active delivery, and supply chain management. Invoke when optimizing hauler logic or debugging resource starvation."
+description: "定义能量分配、主动配送和供应链管理的规则。在优化搬运工逻辑或调试资源短缺时调用。"
 ---
 
 # Logistics Protocol (物流协议)
 
-This skill defines the standard operating procedures for energy logistics within the colony. It governs how energy is transported from Sources to Sinks and how Creeps coordinate supply and demand.
+此技能定义了殖民地内能量物流的标准操作程序。它规定了能量如何从源头（Sources）输送到目的地（Sinks），以及 Creep 如何协调供需。
 
-## 1. Supply Chain Hierarchy
+## 1. 供应链层级
 
-### Sources (Producers)
+### 源头（生产者）
 
-- **Primary**: Dropped Resources (Decay fast, highest pickup priority).
-- **Secondary**: Mining Containers (Standard source).
-- **Tertiary**: Tombstones & Ruins (Opportunistic).
+- **主要**：掉落资源（衰减快，拾取优先级最高）。
+- **次要**：采矿容器（标准来源）。
+- **第三**：墓碑和遗迹（机会性）。
 
-### Sinks (Consumers)
+### 目的地（消费者）
 
-- **Tier 1 (Critical)**: Spawn, Extensions (Survival).
-- **Tier 1.5 (Priority Construction)**: Builders working on Critical Structures (Spawn/Extension/Tower) with `priorityRequest` active.
-- **Tier 2 (Defense)**: Towers (Energy < 500).
-- **Tier 3 (Active Support)**:
-  - **Upgraders**: When energy < 50% and actively working.
-  - **Builders**: When energy < 50% (Standard active delivery).
-- **Tier 4 (Storage)**: Storage, Terminal (Surplus).
-- **Tier 5 (Buffer)**: General Containers, Controller Link.
+- **第1级（关键）**：Spawn、Extensions（生存）。
+- **第1.5级（优先建造）**：在关键建筑（Spawn/Extension/Tower）上工作且激活了 `priorityRequest` 的建造者。
+- **第2级（防御）**：Towers（能量 < 500）。
+- **第3级（主动支持）**：
+  - **升级者**：当能量 < 50% 且正在工作时。
+  - **建造者**：当能量 < 50%（标准主动配送）。
+- **第4级（存储）**：Storage、Terminal（盈余）。
+- **第5级（缓冲）**：普通容器、Controller Link。
 
-## 2. Active Delivery Protocol (主动配送)
+## 2. 主动配送协议
 
-Haulers use a **Weighted Scoring System** to select the best delivery target, balancing Priority and Distance.
+搬运工使用**加权评分系统**来选择最佳配送目标，平衡优先级和距离。
 
-### Target Selection Algorithm
+### 目标选择算法
 
 `Score = BasePriority - (Distance * 1.0)`
 
-### Base Priorities
+### 基础优先级
 
-- **200**: Spawn / Extension (Critical Survival).
-- **150**: Priority Builder (Tagged `priorityRequest`).
-- **120**: Tower (Defense/Repair).
-- **100**: Upgrader (Active).
-- **80**: Builder (Standard).
-- **50**: Sink Container (Buffer).
-- **10**: Storage (Surplus).
+- **200**：Spawn / Extension（关键生存）。
+- **150**：优先建造者（标记为 `priorityRequest`）。
+- **120**：Tower（防御/维修）。
+- **100**：升级者（活跃）。
+- **80**：建造者（标准）。
+- **50**：目标容器（缓冲）。
+- **10**：Storage（盈余）。
 
-### Logic
+### 逻辑
 
-- Haulers scan **ALL** valid targets in the room.
-- A closer, lower-tier target may override a distant, higher-tier target if the priority gap is small (though current gaps are designed to be robust).
-- **Multi-Request Handling**: Haulers inherently handle multiple requests by re-evaluating the best target every tick. If carrying enough energy for multiple creeps, it will deliver to the highest score first, then the next.
+- 搬运工扫描房间内**所有**有效目标。
+- 如果优先级差距较小，较近的低级目标可能会覆盖较远的高级目标（尽管当前差距设计得足够稳健）。
+- **多请求处理**：搬运工通过每个 tick 重新评估最佳目标来固有地处理多个请求。如果携带足够的能量供多个 creep 使用，它将首先交付给得分最高的目标，然后是下一个。
 
-## 3. Request Signaling (请求支援)
+## 3. 请求信号
 
-Creeps (Upgraders/Builders) can signal distress/need via Memory:
+Creep（升级者/建造者）可以通过 Memory 发出求救/需求信号：
 
-### Standard Request (Panic Mode)
+### 标准请求（恐慌模式）
 
-- **Signal**: Set `memory.requestingEnergy = true`.
-- **Condition**: Energy == 0, no nearby supply.
-- **Response**: Standard Hauler delivery (Tier 3).
+- **信号**：设置 `memory.requestingEnergy = true`。
+- **条件**：能量 == 0，附近没有供应。
+- **响应**：标准搬运工配送（第3级）。
 
-### Priority Request (Smart Supply)
+### 优先请求（智能供应）
 
-- **Signal**: Set `memory.requestingEnergy = true` AND `memory.priorityRequest = true`.
-- **Tagging**: Builder tags job type in `memory.targetStructType` (e.g., "spawn", "extension").
-- **Condition**:
-  - Role is **Builder**.
-  - Target is **Critical** (Spawn/Extension/Tower).
-  - Energy < **30%**.
-- **Response**: Haulers treat this as Tier 1.5 priority, overriding Towers and Upgraders.
+- **信号**：设置 `memory.requestingEnergy = true` 并且 `memory.priorityRequest = true`。
+- **标记**：建造者在 `memory.targetStructType` 中标记作业类型（例如 "spawn"、"extension"）。
+- **条件**：
+  - 角色是**建造者**。
+  - 目标是**关键**建筑（Spawn/Extension/Tower）。
+  - 能量 < **30%**。
+- **响应**：搬运工将其视为第1.5级优先级，覆盖 Towers 和升级者。
 
-### Termination
+### 终止
 
-- Creep clears flags when `store.getFreeCapacity() == 0`.
+- 当 `store.getFreeCapacity() == 0` 时，Creep 清除标志。
 
-## 4. Anti-Starvation Rules
+## 4. 防饥饿规则
 
-- **Builder Deadlock**: If Builder has 0 energy and no supply, it MUST NOT block the mining spot. It should move to a "Waiting Area" or request delivery.
-- **Hauler Idle**: If Hauler has energy but no standard sinks, it MUST look for Upgraders to dump energy into, rather than sleeping.
+- **建造者死锁**：如果建造者能量为 0 且没有供应，它**绝不能**阻挡采矿点。它应该移动到"等待区"或请求配送。
+- **搬运工空闲**：如果搬运工有能量但没有标准目的地，它**必须**寻找升级者来倾倒能量，而不是休眠。

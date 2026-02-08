@@ -148,27 +148,29 @@ export default class Builder extends Role {
 
         // Optimize: Move towards the nearest Hauler with energy to meet halfway
         const hauler = this.creep.pos.findClosestByPath(FIND_MY_CREEPS, {
-          filter: (c) =>
-            c.memory.role === "hauler" && c.store[RESOURCE_ENERGY] > 0,
+            filter: (c) => c.memory.role === 'hauler' && c.store[RESOURCE_ENERGY] > 0
         });
 
         if (hauler) {
-          // Only move if not in range to transfer (Range 1)
-          if (!this.creep.pos.inRangeTo(hauler, 1)) {
-            this.move(hauler, {
-              visualizePathStyle: {
-                stroke: "#00ff00",
-                lineStyle: "dashed",
-                opacity: 0.5,
-              },
-            });
-          }
+            // Only move if not in range to transfer (Range 1)
+            // Stop moving if range is 1 to avoid dancing
+            const range = this.creep.pos.getRangeTo(hauler);
+            if (range > 1) {
+                this.move(hauler, { visualizePathStyle: { stroke: "#00ff00", lineStyle: 'dashed', opacity: 0.5 } });
+            }
         } else {
-          // Harvest fallback (only if desperate or early game)
-          const source = this.creep.pos.findClosestByPath(FIND_SOURCES);
-          if (source && this.creep.harvest(source) === ERR_NOT_IN_RANGE) {
-            this.move(source);
-          }
+             // Harvest fallback (only if desperate or early game)
+             // Only if NO haulers exist or are dead
+             const haulersExist = this.creep.room.find(FIND_MY_CREEPS, { filter: (c) => c.memory.role === 'hauler' }).length > 0;
+             if (!haulersExist) {
+                const source = this.creep.pos.findClosestByPath(FIND_SOURCES);
+                if (source && this.creep.harvest(source) === ERR_NOT_IN_RANGE) {
+                  this.move(source);
+                }
+             } else {
+                 // Wait for hauler (idle)
+                 this.creep.say("⏳ waiting");
+             }
         }
       }
     }
