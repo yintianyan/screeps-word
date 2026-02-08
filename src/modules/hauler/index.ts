@@ -7,15 +7,11 @@ export default class Hauler extends Role {
   }
 
   checkState() {
-    // @ts-ignore
     if (this.memory.working && this.creep.store[RESOURCE_ENERGY] === 0) {
-      // @ts-ignore
       this.memory.working = false; // Go to Collect
       this.creep.say("🔄 collect");
     }
-    // @ts-ignore
     if (!this.memory.working && this.creep.store.getFreeCapacity() === 0) {
-      // @ts-ignore
       this.memory.working = true; // Go to Deliver
       this.creep.say("🚚 deliver");
     }
@@ -28,7 +24,6 @@ export default class Hauler extends Role {
   }
 
   executeState() {
-    // @ts-ignore
     if (this.memory.working) {
       // === DELIVER STATE ===
       // Use Brain to find best delivery target
@@ -43,57 +38,93 @@ export default class Hauler extends Role {
       brain.generateTasks();
 
       const task = brain.getBestTask(this.creep);
+      const energyLevel = this.creep.room.memory.energyLevel || "LOW";
+
+      // 0. CRITICAL OVERRIDE: Strict Spawn/Extension Priority
+      // If energy is CRITICAL, we ignore everything else until Spawn/Extensions are full.
+      if (energyLevel === "CRITICAL") {
+        const extensions = this.creep.room.find(FIND_MY_STRUCTURES, {
+          filter: (s) =>
+            (s.structureType === STRUCTURE_SPAWN ||
+              s.structureType === STRUCTURE_EXTENSION) &&
+            s.store.getFreeCapacity(RESOURCE_ENERGY) > 0,
+        });
+        if (extensions.length > 0) {
+          const target = this.creep.pos.findClosestByPath(extensions);
+          if (target) {
+            if (
+              this.creep.transfer(target, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE
+            ) {
+              this.move(target, {
+                visualizePathStyle: { stroke: "#ffffff", strokeWidth: 0.5 },
+              });
+            }
+            return;
+          }
+        }
+      }
 
       // 1. High Priority: Spawn / Extension (From Brain)
       if (task && task.type === "transfer_spawn") {
         const target = Game.getObjectById(task.targetId as Id<any>);
         if (target) {
-          // @ts-ignore
           const result = this.creep.transfer(target, RESOURCE_ENERGY);
           if (result === ERR_NOT_IN_RANGE) {
-            // @ts-ignore
-            this.move(target, { visualizePathStyle: { stroke: "#ffffff" } });
+            this.move(target as Structure | { pos: RoomPosition }, {
+              visualizePathStyle: { stroke: "#ffffff" },
+            });
           }
           return;
         }
       }
 
       // 2. Medium Priority: Towers (Defense/Repair)
-      const towers = this.creep.room.find(FIND_STRUCTURES, {
-        filter: (s) =>
-          s.structureType === STRUCTURE_TOWER &&
-          s.store.getFreeCapacity(RESOURCE_ENERGY) > 100,
-      });
-      if (towers.length > 0) {
-        const target = this.creep.pos.findClosestByPath(towers);
-        if (target) {
-          if (
-            this.creep.transfer(target, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE
-          ) {
-            this.move(target, { visualizePathStyle: { stroke: "#ff0000" } });
+      // Only fill towers if NOT in CRITICAL mode (unless tower is empty/danger)
+      if (energyLevel !== "CRITICAL") {
+        const towers = this.creep.room.find(FIND_STRUCTURES, {
+          filter: (s) =>
+            s.structureType === STRUCTURE_TOWER &&
+            s.store.getFreeCapacity(RESOURCE_ENERGY) > 100,
+        });
+        if (towers.length > 0) {
+          const target = this.creep.pos.findClosestByPath(towers);
+          if (target) {
+            if (
+              this.creep.transfer(target, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE
+            ) {
+              this.move(target, { visualizePathStyle: { stroke: "#ff0000" } });
+            }
+            return;
           }
-          return;
         }
       }
 
       // 2.1 [NEW] Active Delivery to Upgraders (Low Energy)
       // Only deliver if Upgrader is working and running low
-      const needyUpgraders = this.creep.room.find(FIND_MY_CREEPS, {
-        filter: (c) =>
-          c.memory.role === "upgrader" &&
-          c.memory.working &&
-          c.store.getFreeCapacity(RESOURCE_ENERGY) > c.store.getCapacity() * 0.5 &&
-          !c.pos.inRangeTo(this.creep.room.controller, 1) // Don't block controller spot? Actually fine.
-      });
+      // DISABLE in CRITICAL mode
+      if (energyLevel !== "CRITICAL") {
+        const needyUpgraders = this.creep.room.find(FIND_MY_CREEPS, {
+          filter: (c) =>
+            c.memory.role === "upgrader" &&
+            c.memory.working &&
+            c.store.getFreeCapacity(RESOURCE_ENERGY) >
+              c.store.getCapacity() * 0.5 &&
+            !c.pos.inRangeTo(this.creep.room.controller, 1), // Don't block controller spot? Actually fine.
+        });
 
-      if (needyUpgraders.length > 0) {
-         const target = this.creep.pos.findClosestByPath(needyUpgraders);
-         if (target) {
-            if (this.creep.transfer(target, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-               this.move(target, { visualizePathStyle: { stroke: "#00ff00", opacity: 0.5 } });
+        if (needyUpgraders.length > 0) {
+          const target = this.creep.pos.findClosestByPath(needyUpgraders);
+          if (target) {
+            if (
+              this.creep.transfer(target, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE
+            ) {
+              this.move(target, {
+                visualizePathStyle: { stroke: "#00ff00", opacity: 0.5 },
+              });
             }
             return;
-         }
+          }
+        }
       }
 
       // 2.2 [NEW] Active Delivery to Builders (Critical Projects)
@@ -102,17 +133,21 @@ export default class Hauler extends Role {
         filter: (c) =>
           c.memory.role === "builder" &&
           (c.memory.working || c.memory.requestingEnergy) &&
-          c.store[RESOURCE_ENERGY] < c.store.getCapacity() * 0.3
+          c.store[RESOURCE_ENERGY] < c.store.getCapacity() * 0.3,
       });
 
       if (needyBuilders.length > 0) {
-          const target = this.creep.pos.findClosestByPath(needyBuilders);
-          if (target) {
-             if (this.creep.transfer(target, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-                this.move(target, { visualizePathStyle: { stroke: "#ffff00", opacity: 0.5 } });
-             }
-             return;
+        const target = this.creep.pos.findClosestByPath(needyBuilders);
+        if (target) {
+          if (
+            this.creep.transfer(target, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE
+          ) {
+            this.move(target, {
+              visualizePathStyle: { stroke: "#ffff00", opacity: 0.5 },
+            });
           }
+          return;
+        }
       }
 
       // 3. User Request: Controller Container & Spawn Container
@@ -201,13 +236,9 @@ export default class Hauler extends Role {
       if (!dropped && !container) {
         // Move to a parking spot near source to avoid blocking spawn
         // Ideally, read sourceId from memory
-        // @ts-ignore
         if (this.memory.sourceId) {
-          // @ts-ignore
-          const source = Game.getObjectById(this.memory.sourceId);
-          // @ts-ignore
+          const source = Game.getObjectById(this.memory.sourceId as Id<Source>);
           if (source && !this.creep.pos.inRangeTo(source, 3)) {
-            // @ts-ignore
             this.move(source);
           }
         }

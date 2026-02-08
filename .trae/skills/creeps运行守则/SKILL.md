@@ -32,57 +32,40 @@ description: "强制执行 Creep 的基于角色的约束。在定义、调试�
 
 ### 2. 搬运工 (Hauler)
 
-- **定位**：**全图游走，动态绑定**。是物流网络的血管，通常绑定特定的 Source 线路，但数量根据积压情况动态调整。
-- **主要任务**：承担所有运输工作。
-  - 将能量从采矿容器运送到重生点/扩展/仓库。
-  - **主动喂养 (Energy Sharing)**：直接将能量传递给正在原地等待 (`🙏 wait`) 的升级者或建造者。
-  - 将能量运送到建造现场附近的容器（供建造者使用）。
-- **取货策略 (Waiting Strategy)**：
-  - **死等模式**：到达绑定的 Source Container 后，必须**原地等待直到背包满载**。即使 Container 暂时为空，也不得离开，确保第一时间运走产出的能量。
-- **物流规则**：
-  - **明确目的地**：必须锁定一个送货目标 (Target Lock)，直到送货完成或目标失效。
-  - **动态再平衡 (Rebalancing)**：随时可能被系统强制重新分配到另一个积压更严重的 Source（显示 `🔀 reassign`）。
-  - **预判饱和 (Predictive Saturation)**：
-    - 在选择或确认目标时，必须查询其他所有搬运工的目标和携带量。
-    - 如果其他搬运工正在运往同一目标的能量总和 >= 目标的剩余容量，视为“饱和”。
-    - **立即切换**：如果发现当前目标已饱和，必须立即放弃并重新寻找未饱和的目标，避免无效运输。
-  - **智能重定向**：如果到达目的地发现目标已满 (Full)，必须立即扫描周围 3 格内请求能量的 Creep 并优先分配给它们。
-  - **优先级**：Builder > Upgrader > Other。对于等待超过 5 ticks 的 Creep，享有最高优先级。
-- **允许**：
-  - 捡起掉落的能量。
-  - 从墓碑/废墟中提取能量。
+- **定位**：**全图游走，动态绑定**。
+- **主动物流 (Active Delivery Protocol)**：
+  - **核心职责**：不再只是填满容器，而是**主动配送**能量给急需的 Creep。
+  - **触发条件**：
+    - 目标必须是 `upgrader` 或 `builder`。
+    - 目标能量低 (< 50%) 且正在工作或等待 (`working` or `requestingEnergy`)。
+    - (Builder) 正在建造关键设施 (Spawn/Extension)。
+  - **优先级**：Spawn/Extension > Tower > **Upgrader/Builder (直送)** > Sink Containers > Storage。
+- **取货策略**：
+  - **第一优先级**：掉落资源 (Dropped Resources)。这是会衰减的资源，必须最快捡起。
+  - **第二优先级**：源头容器 (Mining Container)。
 - **禁止**：
   - 采集能量。
-  - 将能量运回采矿容器（防止回流）。
-  - 升级控制器。
+  - 将能量运回采矿容器。
 
 ### 3. 升级者 (Upgrader)
 
-- **定位**：**稳定不动**。驻扎在控制器 (Controller) 旁的容器或链路 (Link) 附近。
+- **定位**：**稳定不动 / 请求支援**。
 - **主要任务**：持续升级控制器。
-- **物流模式**：**等待喂养**。依靠搬运工将能量运送到身边的容器中，或通过 Link 传输。
-- **禁止**：
-  - 移动去远处的 Source 或 Storage 取货（应由 Hauler 代劳）。
-  - 建造工地。
-  - 运输能量。
+- **智能获取 (Smart Acquisition)**：
+  - **优先**：捡起脚下的掉落能量。
+  - **次选**：从身边的 Link/Container 取货。
+  - **请求支援 (Requesting Energy)**：如果以上均无，在 Memory 中设置 `requestingEnergy: true`，头顶显示 `📡 help`，原地等待 Hauler 配送。
+  - **最后手段**：仅在极度缺乏能量且无 Hauler 响应时，才去 Source 采集。
 
 ### 4. 建造者 (Builder)
 
-- **定位**：**区域稳定**。在工地附近工作，尽量减少长途奔波。
+- **定位**：**区域稳定 / 请求支援**。
 - **主要任务**：建造工地。
-- **任务优先级**：
-  1.  **紧急维修 (Critical Repair)**: Container/Road 生命值 < 20% (头顶显示 `🔧 critical`)。
-  2.  **建造任务 (Construction)**: 只要有工地，全力建造 (头顶显示 `🔨 build`)。
-  3.  **闲时维修 (Maintenance Repair)**: 无工地时，修补 Container/Road 至 80% (头顶显示 `🔧 repair`)。
-- **强制工作**：如果尝试取能失败但背包内有剩余能量，**必须**强制开始工作，禁止原地发呆。
-- **物流模式**：就近取货。优先从附近的容器、仓库或掉落资源获取能量。
-  - **基地便利取能**：如果在 Spawn/Extension 附近 (Range 5) 且其他来源不足，允许直接从 Spawn/Extension 取能。
-    - **限制条件**：必须保证房间能量充足 (`energyAvailable > 300`)，以确保 Spawn 能够正常孵化。
-
-* **禁止**：
-
-- 从 Source 直接采集（除非紧急情况）。
-- 长途运输能量给 Spawn（这是 Hauler 的活）。
+- **优先级系统**：严格遵循 `PriorityModule` (Spawn > Tower > Container > Extension > Wall > Road)。
+- **智能获取**：
+  - 同 Upgrader，优先利用掉落物或容器。
+  - 当能量耗尽且在进行关键建设时，发出 `requestingEnergy` 信号，获得 Hauler 的优先配送。
+- **强制工作**：如果尝试取能失败但背包内有剩余能量，**必须**强制开始工作。
 
 ## 实现指南 (Implementation Guidelines)
 

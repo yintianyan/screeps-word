@@ -7,12 +7,10 @@ export default class Harvester extends Role {
 
   executeState() {
     // 0. Initialize Source
-    // @ts-ignore
     if (!this.memory.sourceId) {
       this.assignSource();
     }
 
-    // @ts-ignore
     const source = Game.getObjectById(this.memory.sourceId as Id<Source>);
     if (!source) return;
 
@@ -27,8 +25,7 @@ export default class Harvester extends Role {
       const container = source.pos.findInRange(FIND_STRUCTURES, 1, {
         filter: (s) =>
           s.structureType === STRUCTURE_CONTAINER &&
-          // @ts-ignore
-          s.store.getFreeCapacity(RESOURCE_ENERGY) > 0,
+          (s as StructureContainer).store.getFreeCapacity(RESOURCE_ENERGY) > 0,
       })[0];
 
       if (container) {
@@ -41,7 +38,6 @@ export default class Harvester extends Role {
         // Fallback: Drop mining or wait for Hauler
         // Or if emergency (no haulers), deliver to Spawn
         const haulers = this.creep.room.find(FIND_MY_CREEPS, {
-          // @ts-ignore
           filter: (c) => c.memory.role === "hauler",
         });
         if (haulers.length === 0) {
@@ -67,7 +63,6 @@ export default class Harvester extends Role {
     const sources = this.creep.room.find(FIND_SOURCES);
     // Simple random assignment for now, or use population module's logic
     // Ideally this should be passed from Spawner
-    // @ts-ignore
     this.memory.sourceId =
       sources[Math.floor(Math.random() * sources.length)].id;
   }

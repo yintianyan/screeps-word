@@ -57,10 +57,28 @@ const populationModule = {
     const percentage = available / capacity;
     const currentLevel = room.memory.energyLevel as EnergyLevel;
 
-    // Critical check (Override)
+    // Critical check (Override based on Total Energy)
+    // Calculate Total Usable Energy (Spawn + Ext + Storage + Containers + Dropped)
+    const containers = Cache.getStructures(room, STRUCTURE_CONTAINER) as StructureContainer[];
+    const containerEnergy = containers.reduce((sum, c) => sum + c.store[RESOURCE_ENERGY], 0);
+    const storageEnergy = room.storage ? room.storage.store[RESOURCE_ENERGY] : 0;
+    const dropped = Cache.getTick(`dropped_${room.name}`, () => room.find(FIND_DROPPED_RESOURCES));
+    const droppedEnergy = dropped.reduce((sum, r) => sum + (r.resourceType === RESOURCE_ENERGY ? r.amount : 0), 0);
+    
+    const totalEnergy = available + containerEnergy + storageEnergy + droppedEnergy;
+    room.memory.totalEnergy = totalEnergy; // Store for other modules
+
+    // If total energy is less than what's needed for a basic recovery (e.g. 2 max creeps ~ 1000-2000), 
+    // or if we literally can't spawn anything.
     if (available < 300 && capacity >= 300) {
       room.memory.energyLevel = "CRITICAL";
       return;
+    }
+    
+    // If we have capacity but total energy is extremely low, we are in a resource crisis
+    if (totalEnergy < 1000 && capacity >= 550) { // RCL 2+
+         room.memory.energyLevel = "CRITICAL";
+         return;
     }
 
     let newLevel = currentLevel;

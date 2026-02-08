@@ -62,10 +62,10 @@ export default class Role {
 
   /**
    * Wrapper for smart move
-   * @param {RoomPosition|{pos: RoomPosition}} target
+   * @param {RoomPosition|{pos: RoomPosition}|Structure} target
    * @param {Object} opts
    */
-  move(target: RoomPosition | { pos: RoomPosition }, opts = {}) {
+  move(target: RoomPosition | { pos: RoomPosition } | Structure, opts = {}) {
     return moveModule.smartMove(this.creep, target, opts);
   }
 }

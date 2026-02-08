@@ -6,7 +6,6 @@ export default class Upgrader extends Role {
   }
 
   executeState() {
-    // @ts-ignore
     if (this.memory.working) {
       // === UPGRADE ===
       if (
@@ -14,8 +13,7 @@ export default class Upgrader extends Role {
           this.creep.room.controller as StructureController,
         ) === ERR_NOT_IN_RANGE
       ) {
-        // @ts-ignore
-        this.move(this.creep.room.controller, {
+        this.move(this.creep.room.controller as StructureController, {
           visualizePathStyle: { stroke: "#ffffff" },
         });
       }
@@ -37,17 +35,22 @@ export default class Upgrader extends Role {
       // 3. Container
       // 4. Source (last resort, usually avoided)
 
-      const target = this.creep.pos.findClosestByPath(FIND_STRUCTURES, {
-        filter: (s) =>
-          (s.structureType === STRUCTURE_CONTAINER ||
-            s.structureType === STRUCTURE_STORAGE) &&
-          // @ts-ignore
-          s.store[RESOURCE_ENERGY] > 0,
-      });
+      // In CRITICAL mode, do NOT withdraw from containers (save for Spawn)
+      const energyLevel = this.creep.room.memory.energyLevel;
+      const canWithdraw = energyLevel !== "CRITICAL";
+
+      let target = null;
+      if (canWithdraw) {
+        target = this.creep.pos.findClosestByPath(FIND_STRUCTURES, {
+            filter: (s) =>
+            (s.structureType === STRUCTURE_CONTAINER ||
+                s.structureType === STRUCTURE_STORAGE) &&
+            (s as StructureContainer | StructureStorage).store[RESOURCE_ENERGY] > 0,
+        });
+      }
 
       if (target) {
         // Clear request flag if we found a target
-        // @ts-ignore
         if (this.memory.requestingEnergy) delete this.memory.requestingEnergy;
 
         if (this.creep.withdraw(target, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
@@ -56,7 +59,6 @@ export default class Upgrader extends Role {
       } else {
         // === REQUEST DELIVERY ===
         // If no container nearby, signal Haulers
-        // @ts-ignore
         this.memory.requestingEnergy = true;
         this.creep.say("📡 help");
         

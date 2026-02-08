@@ -638,8 +638,23 @@ const populationModule = {
         const available = room.energyAvailable;
         const percentage = available / capacity;
         const currentLevel = room.memory.energyLevel;
-        // Critical check (Override)
+        // Critical check (Override based on Total Energy)
+        // Calculate Total Usable Energy (Spawn + Ext + Storage + Containers + Dropped)
+        const containers = Cache.getStructures(room, STRUCTURE_CONTAINER);
+        const containerEnergy = containers.reduce((sum, c) => sum + c.store[RESOURCE_ENERGY], 0);
+        const storageEnergy = room.storage ? room.storage.store[RESOURCE_ENERGY] : 0;
+        const dropped = Cache.getTick(`dropped_${room.name}`, () => room.find(FIND_DROPPED_RESOURCES));
+        const droppedEnergy = dropped.reduce((sum, r) => sum + (r.resourceType === RESOURCE_ENERGY ? r.amount : 0), 0);
+        const totalEnergy = available + containerEnergy + storageEnergy + droppedEnergy;
+        room.memory.totalEnergy = totalEnergy; // Store for other modules
+        // If total energy is less than what's needed for a basic recovery (e.g. 2 max creeps ~ 1000-2000), 
+        // or if we literally can't spawn anything.
         if (available < 300 && capacity >= 300) {
+            room.memory.energyLevel = "CRITICAL";
+            return;
+        }
+        // If we have capacity but total energy is extremely low, we are in a resource crisis
+        if (totalEnergy < 1000 && capacity >= 550) { // RCL 2+
             room.memory.energyLevel = "CRITICAL";
             return;
         }
@@ -2398,13 +2413,13 @@ const moveModule = {
         }
         else {
             // 优化：不立即清零，而是缓慢减少，防止路径震荡
-            if (creep.memory._move.stuckCount > 0) {
+            if (creep.memory._move.stuckCount && creep.memory._move.stuckCount > 0) {
                 creep.memory._move.stuckCount--;
             }
             creep.memory._move.lastX = creep.pos.x;
             creep.memory._move.lastY = creep.pos.y;
         }
-        const stuckCount = creep.memory._move.stuckCount;
+        const stuckCount = creep.memory._move.stuckCount || 0;
         // 默认配置
         let moveOpts = Object.assign({
             visualizePathStyle: { stroke: "#ffffff", lineStyle: "dashed" },
@@ -2429,18 +2444,9 @@ const moveModule = {
                 // 4. 车道偏好 (仅在未严重卡住时使用)
                 if (stuckCount < 8) {
                     let direction = 0;
-                    // @ts-ignore
-                    const dx = target.pos
-                        ? // @ts-ignore
-                            target.pos.x - creep.pos.x
-                        : // @ts-ignore
-                            target.x - creep.pos.x;
-                    // @ts-ignore
-                    const dy = target.pos
-                        ? // @ts-ignore
-                            target.pos.y - creep.pos.y
-                        : // @ts-ignore
-                            target.y - creep.pos.y;
+                    const targetPos = target.pos ? target.pos : target;
+                    const dx = targetPos.x - creep.pos.x;
+                    const dy = targetPos.y - creep.pos.y;
                     if (Math.abs(dy) > Math.abs(dx)) {
                         direction = dy < 0 ? TOP : BOTTOM;
                     }
@@ -2465,7 +2471,8 @@ const moveModule = {
         if (stuckCount >= 3 && stuckCount <= 5) {
             moveOpts.reusePath = 0; // 强制重算
             moveOpts.visualizePathStyle = { stroke: "#ffff00", lineStyle: "dotted" };
-            const path = creep.pos.findPathTo(target, {
+            const targetPos = target.pos || target;
+            const path = creep.pos.findPathTo(targetPos, {
                 ignoreCreeps: true,
                 range: moveOpts.range,
                 maxRooms: 1,
@@ -2512,20 +2519,22 @@ const moveModule = {
                     continue;
                 if (pos.lookFor(LOOK_CREEPS).length > 0)
                     continue;
-                if (pos
-                    .lookFor(LOOK_STRUCTURES)
-                    // @ts-ignore
-                    .some((s) => OBSTACLE_OBJECT_TYPES.includes(s.structureType)))
+                const structures = pos.lookFor(LOOK_STRUCTURES);
+                // OBSTACLE_OBJECT_TYPES is defined in constants.js/ts globally in screeps usually, 
+                // but here we might need to be careful. 
+                // Standard check:
+                const isObstacle = structures.some(s => s.structureType !== STRUCTURE_ROAD &&
+                    s.structureType !== STRUCTURE_CONTAINER &&
+                    OBSTACLE_OBJECT_TYPES.includes(s.structureType));
+                if (isObstacle)
                     continue;
                 // 评分逻辑：
                 // 1. 离目标不要太远 (权重 10)
                 // 2. 必须离开道路 (权重 20)
                 // 3. 避免再次进入狭窄通道 (检查周围空位数量)
-                // @ts-ignore
-                let score = (20 - pos.getRangeTo(target)) * 1;
-                const isOnRoad = pos
-                    .lookFor(LOOK_STRUCTURES)
-                    .some((s) => s.structureType === STRUCTURE_ROAD);
+                const targetPos = target.pos || target;
+                let score = (20 - pos.getRangeTo(targetPos)) * 1;
+                const isOnRoad = structures.some((s) => s.structureType === STRUCTURE_ROAD);
                 if (!isOnRoad)
                     score += 50;
                 // 检查周围空位
@@ -2540,18 +2549,17 @@ const moveModule = {
                 possiblePos.push({ pos, score });
             }
             if (possiblePos.length > 0) {
-                // @ts-ignore
-                const best = ___namespace.max(possiblePos, (p) => p.score);
-                // 如果当前位置分值已经很高（不在路上），则原地等待
-                const currentIsOnRoad = this.isOnRoad(creep);
-                // @ts-ignore
-                if (!currentIsOnRoad && best.score < 60) {
-                    creep.say("💤 parking");
+                const best = ___namespace.maxBy(possiblePos, (p) => p.score);
+                if (best) {
+                    // 如果当前位置分值已经很高（不在路上），则原地等待
+                    const currentIsOnRoad = this.isOnRoad(creep);
+                    if (!currentIsOnRoad && best.score < 60) {
+                        creep.say("💤 parking");
+                        return;
+                    }
+                    creep.move(creep.pos.getDirectionTo(best.pos));
                     return;
                 }
-                // @ts-ignore
-                creep.move(creep.pos.getDirectionTo(best.pos));
-                return;
             }
         }
         // === 正常移动执行 ===
@@ -2568,7 +2576,6 @@ const moveModule = {
             // 注意：这里的 dir 是请求者相对于我的方向，所以我要移向请求者
             // 但其实更简单的做法是直接移向请求者的位置
             const oppositeDir = ((dir + 3) % 8) + 1;
-            // @ts-ignore
             creep.move(oppositeDir);
             creep.say("🔄 OK");
             console.log(`[Move] ${creep.name} responding to move request (direction: ${oppositeDir})`);
@@ -2579,10 +2586,9 @@ const moveModule = {
             if (stuckCount > 5) {
                 creep.say("🚫 trapped");
                 // 尝试向反方向退一步，腾出空间
-                // @ts-ignore
-                const dirToTarget = creep.pos.getDirectionTo(target);
+                const targetPos = target.pos || target;
+                const dirToTarget = creep.pos.getDirectionTo(targetPos);
                 const oppositeDir = ((dirToTarget + 3) % 8) + 1;
-                // @ts-ignore
                 creep.move(oppositeDir);
             }
         }
@@ -2667,8 +2673,11 @@ const moveModule = {
                 if (pos.lookFor(LOOK_CREEPS).length > 0)
                     continue;
                 // 检查锚点范围
-                if (anchor && !pos.inRangeTo(anchor, range))
-                    continue;
+                if (anchor) {
+                    const anchorPos = anchor.pos || anchor;
+                    if (!pos.inRangeTo(anchorPos, range))
+                        continue;
+                }
                 adjacent.push(pos);
             }
         }
@@ -2696,29 +2705,7 @@ const moveModule = {
                 return;
             const dir = moveRequest.dir;
             // 反向移动实现对穿
-            // dir 是请求者相对于我的方向 (例如请求者在 TOP，dir=1)
-            // 我需要移向请求者，即 move(1)
-            // 等等，requestMove 的参数 dir 是 requestMove(target, direction)
-            // 在 TrafficManager.requestMove 中: target.memory._moveRequest = { dir: direction, tick: Game.time }
-            // 这里的 direction 是 "move direction of the requester".
-            // 如果 requester 想往 TOP 走，direction 是 TOP (1).
-            // requester 在我的 BOTTOM.
-            // 我在 requester 的 TOP.
-            // requester 想去 TOP (我的位置).
-            // 我应该去哪里？
-            // 为了对穿，我应该去 requester 的位置 (BOTTOM).
-            // 所以我应该去 opposite direction of requester's move direction.
-            // 如果 requester move TOP (1), 我应该 move BOTTOM (5).
-            // 让我们确认 TrafficManager.requestMove 的调用:
-            // smartMove: TrafficManager.requestMove(obstacle, creep.pos.getDirectionTo(obstacle));
-            // 这里的第二个参数是 "direction to obstacle".
-            // 如果 obstacle 在 TOP. direction 是 TOP.
-            // obstacle 收到 { dir: TOP }.
-            // obstacle 需要移向我 (BOTTOM).
-            // opposite of TOP is BOTTOM.
-            // 所以:
             const oppositeDir = ((dir + 3) % 8) + 1;
-            // @ts-ignore
             creep.move(oppositeDir);
             creep.say("🔄 yield");
             creep._moveExecuted = true;
@@ -2763,15 +2750,11 @@ class Role {
      */
     checkState() {
         // Default implementation: Toggle working state
-        // @ts-ignore
         if (this.memory.working && this.creep.store[RESOURCE_ENERGY] === 0) {
-            // @ts-ignore
             this.memory.working = false;
             this.creep.say("🔄 gather");
         }
-        // @ts-ignore
         if (!this.memory.working && this.creep.store.getFreeCapacity() === 0) {
-            // @ts-ignore
             this.memory.working = true;
             this.creep.say("⚡ work");
         }
@@ -2784,11 +2767,10 @@ class Role {
     }
     /**
      * Wrapper for smart move
-     * @param {RoomPosition|{pos: RoomPosition}} target
+     * @param {RoomPosition|{pos: RoomPosition}|Structure} target
      * @param {Object} opts
      */
     move(target, opts = {}) {
-        // @ts-ignore
         return moveModule.smartMove(this.creep, target, opts);
     }
 }
@@ -2799,11 +2781,9 @@ class Harvester extends Role {
     }
     executeState() {
         // 0. Initialize Source
-        // @ts-ignore
         if (!this.memory.sourceId) {
             this.assignSource();
         }
-        // @ts-ignore
         const source = Game.getObjectById(this.memory.sourceId);
         if (!source)
             return;
@@ -2818,7 +2798,6 @@ class Harvester extends Role {
             // Check for Link/Container nearby
             const container = source.pos.findInRange(FIND_STRUCTURES, 1, {
                 filter: (s) => s.structureType === STRUCTURE_CONTAINER &&
-                    // @ts-ignore
                     s.store.getFreeCapacity(RESOURCE_ENERGY) > 0,
             })[0];
             if (container) {
@@ -2830,7 +2809,6 @@ class Harvester extends Role {
                 // Fallback: Drop mining or wait for Hauler
                 // Or if emergency (no haulers), deliver to Spawn
                 const haulers = this.creep.room.find(FIND_MY_CREEPS, {
-                    // @ts-ignore
                     filter: (c) => c.memory.role === "hauler",
                 });
                 if (haulers.length === 0) {
@@ -2854,7 +2832,6 @@ class Harvester extends Role {
         const sources = this.creep.room.find(FIND_SOURCES);
         // Simple random assignment for now, or use population module's logic
         // Ideally this should be passed from Spawner
-        // @ts-ignore
         this.memory.sourceId =
             sources[Math.floor(Math.random() * sources.length)].id;
     }
@@ -3011,15 +2988,11 @@ class Hauler extends Role {
         super(creep);
     }
     checkState() {
-        // @ts-ignore
         if (this.memory.working && this.creep.store[RESOURCE_ENERGY] === 0) {
-            // @ts-ignore
             this.memory.working = false; // Go to Collect
             this.creep.say("🔄 collect");
         }
-        // @ts-ignore
         if (!this.memory.working && this.creep.store.getFreeCapacity() === 0) {
-            // @ts-ignore
             this.memory.working = true; // Go to Deliver
             this.creep.say("🚚 deliver");
         }
@@ -3030,7 +3003,6 @@ class Hauler extends Role {
         }
     }
     executeState() {
-        // @ts-ignore
         if (this.memory.working) {
             // === DELIVER STATE ===
             // Use Brain to find best delivery target
@@ -3043,48 +3015,78 @@ class Hauler extends Role {
             brain.analyze();
             brain.generateTasks();
             const task = brain.getBestTask(this.creep);
+            const energyLevel = this.creep.room.memory.energyLevel || "LOW";
+            // 0. CRITICAL OVERRIDE: Strict Spawn/Extension Priority
+            // If energy is CRITICAL, we ignore everything else until Spawn/Extensions are full.
+            if (energyLevel === "CRITICAL") {
+                const extensions = this.creep.room.find(FIND_MY_STRUCTURES, {
+                    filter: (s) => (s.structureType === STRUCTURE_SPAWN ||
+                        s.structureType === STRUCTURE_EXTENSION) &&
+                        s.store.getFreeCapacity(RESOURCE_ENERGY) > 0,
+                });
+                if (extensions.length > 0) {
+                    const target = this.creep.pos.findClosestByPath(extensions);
+                    if (target) {
+                        if (this.creep.transfer(target, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
+                            this.move(target, {
+                                visualizePathStyle: { stroke: "#ffffff", strokeWidth: 0.5 },
+                            });
+                        }
+                        return;
+                    }
+                }
+            }
             // 1. High Priority: Spawn / Extension (From Brain)
             if (task && task.type === "transfer_spawn") {
                 const target = Game.getObjectById(task.targetId);
                 if (target) {
-                    // @ts-ignore
                     const result = this.creep.transfer(target, RESOURCE_ENERGY);
                     if (result === ERR_NOT_IN_RANGE) {
-                        // @ts-ignore
-                        this.move(target, { visualizePathStyle: { stroke: "#ffffff" } });
+                        this.move(target, {
+                            visualizePathStyle: { stroke: "#ffffff" },
+                        });
                     }
                     return;
                 }
             }
             // 2. Medium Priority: Towers (Defense/Repair)
-            const towers = this.creep.room.find(FIND_STRUCTURES, {
-                filter: (s) => s.structureType === STRUCTURE_TOWER &&
-                    s.store.getFreeCapacity(RESOURCE_ENERGY) > 100,
-            });
-            if (towers.length > 0) {
-                const target = this.creep.pos.findClosestByPath(towers);
-                if (target) {
-                    if (this.creep.transfer(target, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-                        this.move(target, { visualizePathStyle: { stroke: "#ff0000" } });
+            // Only fill towers if NOT in CRITICAL mode (unless tower is empty/danger)
+            if (energyLevel !== "CRITICAL") {
+                const towers = this.creep.room.find(FIND_STRUCTURES, {
+                    filter: (s) => s.structureType === STRUCTURE_TOWER &&
+                        s.store.getFreeCapacity(RESOURCE_ENERGY) > 100,
+                });
+                if (towers.length > 0) {
+                    const target = this.creep.pos.findClosestByPath(towers);
+                    if (target) {
+                        if (this.creep.transfer(target, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
+                            this.move(target, { visualizePathStyle: { stroke: "#ff0000" } });
+                        }
+                        return;
                     }
-                    return;
                 }
             }
             // 2.1 [NEW] Active Delivery to Upgraders (Low Energy)
             // Only deliver if Upgrader is working and running low
-            const needyUpgraders = this.creep.room.find(FIND_MY_CREEPS, {
-                filter: (c) => c.memory.role === "upgrader" &&
-                    c.memory.working &&
-                    c.store.getFreeCapacity(RESOURCE_ENERGY) > c.store.getCapacity() * 0.5 &&
-                    !c.pos.inRangeTo(this.creep.room.controller, 1) // Don't block controller spot? Actually fine.
-            });
-            if (needyUpgraders.length > 0) {
-                const target = this.creep.pos.findClosestByPath(needyUpgraders);
-                if (target) {
-                    if (this.creep.transfer(target, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-                        this.move(target, { visualizePathStyle: { stroke: "#00ff00", opacity: 0.5 } });
+            // DISABLE in CRITICAL mode
+            if (energyLevel !== "CRITICAL") {
+                const needyUpgraders = this.creep.room.find(FIND_MY_CREEPS, {
+                    filter: (c) => c.memory.role === "upgrader" &&
+                        c.memory.working &&
+                        c.store.getFreeCapacity(RESOURCE_ENERGY) >
+                            c.store.getCapacity() * 0.5 &&
+                        !c.pos.inRangeTo(this.creep.room.controller, 1), // Don't block controller spot? Actually fine.
+                });
+                if (needyUpgraders.length > 0) {
+                    const target = this.creep.pos.findClosestByPath(needyUpgraders);
+                    if (target) {
+                        if (this.creep.transfer(target, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
+                            this.move(target, {
+                                visualizePathStyle: { stroke: "#00ff00", opacity: 0.5 },
+                            });
+                        }
+                        return;
                     }
-                    return;
                 }
             }
             // 2.2 [NEW] Active Delivery to Builders (Critical Projects)
@@ -3092,13 +3094,15 @@ class Hauler extends Role {
             const needyBuilders = this.creep.room.find(FIND_MY_CREEPS, {
                 filter: (c) => c.memory.role === "builder" &&
                     (c.memory.working || c.memory.requestingEnergy) &&
-                    c.store[RESOURCE_ENERGY] < c.store.getCapacity() * 0.3
+                    c.store[RESOURCE_ENERGY] < c.store.getCapacity() * 0.3,
             });
             if (needyBuilders.length > 0) {
                 const target = this.creep.pos.findClosestByPath(needyBuilders);
                 if (target) {
                     if (this.creep.transfer(target, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-                        this.move(target, { visualizePathStyle: { stroke: "#ffff00", opacity: 0.5 } });
+                        this.move(target, {
+                            visualizePathStyle: { stroke: "#ffff00", opacity: 0.5 },
+                        });
                     }
                     return;
                 }
@@ -3176,13 +3180,9 @@ class Hauler extends Role {
             if (!dropped && !container) {
                 // Move to a parking spot near source to avoid blocking spawn
                 // Ideally, read sourceId from memory
-                // @ts-ignore
                 if (this.memory.sourceId) {
-                    // @ts-ignore
                     const source = Game.getObjectById(this.memory.sourceId);
-                    // @ts-ignore
                     if (source && !this.creep.pos.inRangeTo(source, 3)) {
-                        // @ts-ignore
                         this.move(source);
                     }
                 }
@@ -3196,11 +3196,9 @@ class Upgrader extends Role {
         super(creep);
     }
     executeState() {
-        // @ts-ignore
         if (this.memory.working) {
             // === UPGRADE ===
             if (this.creep.upgradeController(this.creep.room.controller) === ERR_NOT_IN_RANGE) {
-                // @ts-ignore
                 this.move(this.creep.room.controller, {
                     visualizePathStyle: { stroke: "#ffffff" },
                 });
@@ -3222,15 +3220,19 @@ class Upgrader extends Role {
             // 2. Storage
             // 3. Container
             // 4. Source (last resort, usually avoided)
-            const target = this.creep.pos.findClosestByPath(FIND_STRUCTURES, {
-                filter: (s) => (s.structureType === STRUCTURE_CONTAINER ||
-                    s.structureType === STRUCTURE_STORAGE) &&
-                    // @ts-ignore
-                    s.store[RESOURCE_ENERGY] > 0,
-            });
+            // In CRITICAL mode, do NOT withdraw from containers (save for Spawn)
+            const energyLevel = this.creep.room.memory.energyLevel;
+            const canWithdraw = energyLevel !== "CRITICAL";
+            let target = null;
+            if (canWithdraw) {
+                target = this.creep.pos.findClosestByPath(FIND_STRUCTURES, {
+                    filter: (s) => (s.structureType === STRUCTURE_CONTAINER ||
+                        s.structureType === STRUCTURE_STORAGE) &&
+                        s.store[RESOURCE_ENERGY] > 0,
+                });
+            }
             if (target) {
                 // Clear request flag if we found a target
-                // @ts-ignore
                 if (this.memory.requestingEnergy)
                     delete this.memory.requestingEnergy;
                 if (this.creep.withdraw(target, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
@@ -3240,7 +3242,6 @@ class Upgrader extends Role {
             else {
                 // === REQUEST DELIVERY ===
                 // If no container nearby, signal Haulers
-                // @ts-ignore
                 this.memory.requestingEnergy = true;
                 this.creep.say("📡 help");
                 // While waiting, try to harvest if very desperate or early game
@@ -3260,15 +3261,12 @@ class Builder extends Role {
         super(creep);
     }
     executeState() {
-        var _a;
         // 0. Energy Crisis Check
-        // If energy is extremely low, builders should pause to conserve energy
-        // Unless they are building a critical structure (Spawn)
-        const room = this.creep.room;
-        const isCrisis = room.energyAvailable < 300 && !((_a = room.storage) === null || _a === void 0 ? void 0 : _a.store[RESOURCE_ENERGY]);
+        // Use the central energy level from populationManager
+        const energyLevel = this.creep.room.memory.energyLevel;
+        const isCrisis = energyLevel === "CRITICAL";
         // Check if we are building something critical
         let isCriticalTask = false;
-        // @ts-ignore
         if (this.memory.working) {
             // Use priority module to find the best target
             const sites = this.creep.room.find(FIND_CONSTRUCTION_SITES);
@@ -3290,7 +3288,6 @@ class Builder extends Role {
             // But for now, just don't do anything consuming.
             return;
         }
-        // @ts-ignore
         if (this.memory.working) {
             // === WORK ===
             // 1. Critical Repairs (Hits < 10%)
@@ -3327,7 +3324,6 @@ class Builder extends Role {
             }
             // 4. Nothing to do? Upgrade
             if (this.creep.upgradeController(this.creep.room.controller) === ERR_NOT_IN_RANGE) {
-                // @ts-ignore
                 this.move(this.creep.room.controller);
             }
         }
@@ -3347,12 +3343,10 @@ class Builder extends Role {
             const target = this.creep.pos.findClosestByPath(FIND_STRUCTURES, {
                 filter: (s) => (s.structureType === STRUCTURE_CONTAINER ||
                     s.structureType === STRUCTURE_STORAGE) &&
-                    // @ts-ignore
                     s.store[RESOURCE_ENERGY] > 0,
             });
             if (target) {
                 // Clear request flag if we found a target
-                // @ts-ignore
                 if (this.memory.requestingEnergy)
                     delete this.memory.requestingEnergy;
                 if (this.creep.withdraw(target, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
@@ -3362,7 +3356,6 @@ class Builder extends Role {
             else {
                 // === REQUEST DELIVERY ===
                 // If no container nearby, signal Haulers
-                // @ts-ignore
                 this.memory.requestingEnergy = true;
                 this.creep.say("📡 help");
                 // Harvest fallback (only if desperate or early game)

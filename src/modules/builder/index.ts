@@ -8,15 +8,12 @@ export default class Builder extends Role {
 
   executeState() {
     // 0. Energy Crisis Check
-    // If energy is extremely low, builders should pause to conserve energy
-    // Unless they are building a critical structure (Spawn)
-    const room = this.creep.room;
-    const isCrisis =
-      room.energyAvailable < 300 && !room.storage?.store[RESOURCE_ENERGY];
+    // Use the central energy level from populationManager
+    const energyLevel = this.creep.room.memory.energyLevel;
+    const isCrisis = energyLevel === "CRITICAL";
 
     // Check if we are building something critical
     let isCriticalTask = false;
-    // @ts-ignore
     if (this.memory.working) {
       // Use priority module to find the best target
       const sites = this.creep.room.find(FIND_CONSTRUCTION_SITES);
@@ -43,7 +40,6 @@ export default class Builder extends Role {
       return;
     }
 
-    // @ts-ignore
     if (this.memory.working) {
       // === WORK ===
       // 1. Critical Repairs (Hits < 10%)
@@ -92,8 +88,7 @@ export default class Builder extends Role {
           this.creep.room.controller as StructureController,
         ) === ERR_NOT_IN_RANGE
       ) {
-        // @ts-ignore
-        this.move(this.creep.room.controller);
+        this.move(this.creep.room.controller as StructureController);
       }
     } else {
       // === GATHER ===
@@ -113,13 +108,11 @@ export default class Builder extends Role {
         filter: (s) =>
           (s.structureType === STRUCTURE_CONTAINER ||
             s.structureType === STRUCTURE_STORAGE) &&
-          // @ts-ignore
-          s.store[RESOURCE_ENERGY] > 0,
+          (s as StructureContainer | StructureStorage).store[RESOURCE_ENERGY] > 0,
       });
 
       if (target) {
         // Clear request flag if we found a target
-        // @ts-ignore
         if (this.memory.requestingEnergy) delete this.memory.requestingEnergy;
 
         if (this.creep.withdraw(target, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
@@ -128,7 +121,6 @@ export default class Builder extends Role {
       } else {
         // === REQUEST DELIVERY ===
         // If no container nearby, signal Haulers
-        // @ts-ignore
         this.memory.requestingEnergy = true;
         this.creep.say("📡 help");
         
