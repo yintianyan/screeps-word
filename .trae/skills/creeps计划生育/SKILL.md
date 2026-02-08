@@ -15,7 +15,15 @@ description: "管理 Creep 的计划生育策略。在调整人口数量、优�
 
 ## 2. 人口目标计算 (Target Calculation)
 
-在 `module.population.js` 中实现，应遵循以下逻辑：
+在 `components/populationManager.ts` 中实现，结合 `TaskManager` 的负载分析：
+
+### 任务驱动分析 (Task-Driven Analysis)
+
+系统首先通过 `TaskManager.analyze(room)` 计算房间的三大负载：
+
+- **建造负载 (Construction Load)**: 基于工程总量 (`progressTotal`)。
+- **维修负载 (Repair Load)**: 基于需要维修的血量总和。
+- **运输负载 (Transport Load)**: 基于 Container 和地面堆积的能量总量。
 
 ### 采集者 (Harvester)
 
@@ -28,30 +36,30 @@ description: "管理 Creep 的计划生育策略。在调整人口数量、优�
 
 - **基准**：每个 Source 配备 1 名。
 - **动态调整**：
+  - **运输负载高 (High Transport Load)**: 如果 `tasks.transport.difficulty === "HIGH"`，增加 Hauler 数量或体型。
   - **积压检测**：如果 Container 能量 > 1000，+1 名；> 1800，+2 名。
   - **掉落检测**：如果地面掉落能量 > 500，+1 名。
   - **等待惩罚**：如果 Upgrader 平均等待时间 > 20 ticks（能源充足时），全局 +1 名。
-- **动态再平衡 (Dynamic Rebalancing)**：
-  - 每 5 ticks 系统会自动检查所有 Source 的供需情况。
-  - 如果发现某个 Source 严重积压（需求高）而另一个 Source 运力过剩，系统会**强制调拨**多余的 Hauler 进行跨线支援。
 - **上限**：设定硬性上限（如 6 名）以防拥堵。
 
 ### 升级者 (Upgrader)
 
 - **基准**：1 名（维持 Controller 不降级）。
 - **动态调整**：
-  - **富裕模式**：如果 Storage 能量 > 20,000 或 Mining Container 积压严重，增加至 2 名。
-  - **极度富裕模式**：如果 Storage 能量 > 100,000 或所有 Mining Container 都满载，增加至 3 名（甚至更多）。
+  - **任务联动**: 如果 `tasks.construction.difficulty` 为 `LOW` 且能量充足 (`HIGH`)，Upgrader 数量可增加至 3-4 名以利用闲置产能。
   - **紧急模式**：如果 Controller 降级计时 < 4000 ticks，强制设定为 3 名（最高优先级）。
-  - **基建让路**：如果有大量工地（Container/Extension），降至 1 名以节省能量。
-- **Super Upgrader**：当能量极度充裕时，孵化拥有更多 WORK 部件 (6+) 的升级者，单体消耗能力翻倍。
+  - **基建让路**：如果有 `HIGH` 难度的工地，降至 1 名以节省能量。
 
 ### 建造者 (Builder)
 
 - **基准**：0 名（无工地时）。
-- **动态调整**：
-  - **有工地**：根据工地数量调整，每 5 个工地 +1 名，上限 3 名。
-  - **关键设施**：如果是 Container/Extension 工地，设定为至少 2 名。
+- **动态调整 (基于负载)**：
+  - **HIGH 负载**: 3 名。
+  - **MEDIUM 负载**: 2 名。
+  - **LOW 负载**: 1 名。
+  - **维修任务**: 如果没有建造任务但 `tasks.repair.difficulty === "HIGH"`，孵化 1 名 Builder 兼职维修。
+- **节能模式**:
+  - **LOW 能量等级**: 强制减少 Builder 数量，除非有关键设施（Spawn/Extension）。
 
 ## 3. 孵化优先级 (Spawn Priority)
 

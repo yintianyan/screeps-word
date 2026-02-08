@@ -8,11 +8,12 @@
 
 ### 1.1 架构设计
 
-- **Kernel (`core.kernel.js`)**: 作为操作系统核心，负责注册和调度所有模块 (`run()`)，处理全局错误边界，防止单个模块崩溃导致整个 tick 挂起。
-- **Cache (`core.cache.js`)**: 双层缓存系统。
+- **Kernel (`ai/kernel.ts`)**: 作为操作系统核心，负责注册和调度所有模块 (`run()`)，处理全局错误边界，防止单个模块崩溃导致整个 tick 挂起。
+- **Cache (`components/memoryManager.ts`)**: 双层缓存系统。
   - **TickCache**: 缓存 `room.find` 等昂贵 API 的结果，单 tick 有效，显著降低 CPU 消耗。
   - **HeapCache**: 缓存跨 tick 的静态数据（如地形分析结果），减少重复计算。
-- **Module Registry**: 在 `main.js` 中注册功能模块（如 `population`, `planner`, `spawner` 等），按顺序执行。
+- **TaskManager (`components/taskManager.ts`)**: [新增] 负责分析房间内的任务负载（建造、维修、运输），为人口管理提供数据支持。
+- **PriorityModule (`config/priority.ts`)**: [新增] 集中管理的优先级配置系统，定义了所有建筑类型的建造重要性。
 
 ### 1.2 生命周期管理 (Lifecycle)
 
@@ -42,30 +43,29 @@
 ### 2.2 搬运工 (Hauler)
 
 - **职责**: 负责能量的物流运输。
-- **取货策略 (动态负载均衡)**:
-  - 不再死板绑定 Source。
-  - 基于评分系统选择目标：优先处理 "爆仓" (>1800 能量) 的 Container，兼顾距离成本。
-- **送货优先级**:
-  1.  **Spawn/Extension**: 最高优先级，确保繁殖能力。
-  2.  **Controller Container (紧急)**: 若存量 < 500，优先补给以防降级。
-  3.  **Storage**: 中央蓄水池。
-  4.  **Tower**: 防御设施。
-  5.  **Controller Container (常规)**: 日常储备。
+- **主动配送 (Active Delivery)**: [新增]
+  - 当 Upgrader 或 Builder 能量不足且正在执行关键任务时，Hauler 会主动送货上门，而不是等待它们自己来取。
+  - 优先级：Spawn/Extension > Tower > **Upgrader/Builder (直送)** > Sink Containers > Storage。
+- **取货策略**:
+  - 优先捡起地上的掉落资源 (Dropped Resources)，防止衰减浪费。
+  - 其次从源头容器 (Mining Container) 取货。
 
 ### 2.3 升级者 (Upgrader)
 
 - **职责**: 升级 Room Controller (RCL)。
-- **节能模式**:
-  - 若房间储能 < 30%，主动降低工作频率（例如每 2 tick 工作一次），优先保命。
-  - 仅在 Container/Storage 能量充足时才取货，避免抢占 Spawn 资源。
+- **智能获取**:
+  - 优先捡起脚下的掉落能量。
+  - 若无可用容器，会自动发出 **请求支援 (Requesting Energy)** 信号，等待 Hauler 配送。
+  - 仅在极端情况下才去 Source 采集。
 
 ### 2.4 建造者 (Builder)
 
 - **职责**: 建造建筑 (Construction Sites) 和维修 (Repair)。
-- **经济调控**:
-  - **储能 < 40%**: 停止建造，转为待命或辅助维修。
-  - **储能 > 70%**: 全力建造新设施。
-  - **关键设施例外**: Spawn, Extension, Tower 的工地始终优先建造，无视能量限制。
+- **优先级系统**:
+  - 严格遵循 `PriorityModule` 的顺序：Spawn > Tower > Container > Extension > Wall > Road。
+  - 即使脚下有路，也会优先去建远处的 Extension。
+- **请求支援**:
+  - 同 Upgrader，当能量耗尽时可请求 Hauler 补给，确保持续工作。
 
 ---
 

@@ -43,15 +43,11 @@ export default class Role {
    */
   checkState() {
     // Default implementation: Toggle working state
-    // @ts-ignore
     if (this.memory.working && this.creep.store[RESOURCE_ENERGY] === 0) {
-      // @ts-ignore
       this.memory.working = false;
       this.creep.say("🔄 gather");
     }
-    // @ts-ignore
     if (!this.memory.working && this.creep.store.getFreeCapacity() === 0) {
-      // @ts-ignore
       this.memory.working = true;
       this.creep.say("⚡ work");
     }
@@ -70,7 +66,6 @@ export default class Role {
    * @param {Object} opts
    */
   move(target: RoomPosition | { pos: RoomPosition }, opts = {}) {
-    // @ts-ignore
     return moveModule.smartMove(this.creep, target, opts);
   }
 }
