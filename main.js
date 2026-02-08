@@ -3288,6 +3288,8 @@ class Upgrader extends Role {
                     });
                 }
                 if (targetHauler) {
+                    // Found a hauler, reset wait
+                    this.memory.waitTicks = 0;
                     // Only move if not in range to transfer (Range 1)
                     const range = this.creep.pos.getRangeTo(targetHauler);
                     if (range > 1) {
@@ -3303,19 +3305,24 @@ class Upgrader extends Role {
                 }
                 else {
                     // While waiting, try to harvest if very desperate or early game
-                    // Only if NO haulers exist
+                    // Only if NO haulers exist OR we have waited too long
                     const haulersExist = this.creep.room.find(FIND_MY_CREEPS, {
                         filter: (c) => c.memory.role === "hauler",
                     }).length > 0;
+                    const waitTicks = this.memory.waitTicks || 0;
+                    const timeout = waitTicks > 50; // Wait 50 ticks (~2.5 mins) before giving up
                     if (this.creep.room.energyAvailable < 300 ||
-                        (!this.creep.room.storage && !haulersExist)) {
+                        (!this.creep.room.storage && (!haulersExist || timeout))) {
+                        if (timeout)
+                            this.creep.say("😤 timeout");
                         const source = this.creep.pos.findClosestByPath(FIND_SOURCES);
                         if (source && this.creep.harvest(source) === ERR_NOT_IN_RANGE) {
                             this.move(source);
                         }
                     }
                     else {
-                        this.creep.say("⏳ waiting");
+                        this.memory.waitTicks = waitTicks + 1;
+                        this.creep.say(`⏳ ${this.memory.waitTicks}`);
                     }
                 }
             }
@@ -3459,6 +3466,8 @@ class Builder extends Role {
                     });
                 }
                 if (targetHauler) {
+                    // Found a hauler, reset wait
+                    this.memory.waitTicks = 0;
                     // Only move if not in range to transfer (Range 1)
                     // Stop moving if range is 1 to avoid dancing
                     const range = this.creep.pos.getRangeTo(targetHauler);
@@ -3475,11 +3484,15 @@ class Builder extends Role {
                 }
                 else {
                     // Harvest fallback (only if desperate or early game)
-                    // Only if NO haulers exist or are dead
+                    // Only if NO haulers exist or are dead OR we have waited too long
                     const haulersExist = this.creep.room.find(FIND_MY_CREEPS, {
                         filter: (c) => c.memory.role === "hauler",
                     }).length > 0;
-                    if (!haulersExist) {
+                    const waitTicks = this.memory.waitTicks || 0;
+                    const timeout = waitTicks > 50;
+                    if (!haulersExist || timeout) {
+                        if (timeout)
+                            this.creep.say("😤 timeout");
                         const source = this.creep.pos.findClosestByPath(FIND_SOURCES);
                         if (source && this.creep.harvest(source) === ERR_NOT_IN_RANGE) {
                             this.move(source);
@@ -3487,7 +3500,8 @@ class Builder extends Role {
                     }
                     else {
                         // Wait for hauler (idle)
-                        this.creep.say("⏳ waiting");
+                        this.memory.waitTicks = waitTicks + 1;
+                        this.creep.say(`⏳ ${this.memory.waitTicks}`);
                     }
                 }
             }

@@ -76,5 +76,6 @@ Creep（升级者/建造者）可以通过 Memory 发出求救/需求信号：
 
 ## 4. 防饥饿规则
 
-- **建造者死锁**：如果建造者能量为 0 且没有供应，它**绝不能**阻挡采矿点。它应该移动到"等待区"或请求配送。
-- **搬运工空闲**：如果搬运工有能量但没有标准目的地，它**必须**寻找升级者来倾倒能量，而不是休眠。
+- **Builder Deadlock**: If Builder has 0 energy and no supply, it MUST NOT block the mining spot. It should move to a "Waiting Area" or request delivery.
+- **Hauler Idle**: If Hauler has energy but no standard sinks, it MUST look for Upgraders to dump energy into, rather than sleeping.
+- **Wait Timeout**: Creeps waiting for Haulers will timeout after **50 ticks** (approx 2.5 mins). Upon timeout (`😤 timeout`), they will abandon the wait and self-harvest from the nearest source to prevent indefinite starvation.
