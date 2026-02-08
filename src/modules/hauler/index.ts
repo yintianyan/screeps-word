@@ -26,195 +26,208 @@ export default class Hauler extends Role {
   executeState() {
     if (this.memory.working) {
       // === DELIVER STATE ===
-      // Use Brain to find best delivery target
-      // (Assuming Brain is available globally or we instantiate it temporarily)
-      // Since Brain is stateful per tick, ideally it should be managed by Main.
-      // For now, let's just create a temporary one or fallback to simple find
+      const energyLevel = this.creep.room.memory.energyLevel || "LOW";
 
-      // Note: In a real efficient system, Brain should be passed in or singleton.
-      // Here we just use the logic directly or instantiate light version.
+      // Candidate List
+      interface Candidate {
+        target: Structure | Creep;
+        priority: number;
+        type: string;
+        pos: RoomPosition;
+        visual: { stroke: string; opacity?: number; strokeWidth?: number };
+      }
+      const candidates: Candidate[] = [];
+
+      // 1. Brain Task (Spawn/Extension)
+      // Usually High Priority (200)
       const brain = new Brain(this.creep.room);
       brain.analyze();
       brain.generateTasks();
-
       const task = brain.getBestTask(this.creep);
-      const energyLevel = this.creep.room.memory.energyLevel || "LOW";
 
-      // 0. CRITICAL OVERRIDE: Strict Spawn/Extension Priority
-      // If energy is CRITICAL, we ignore everything else until Spawn/Extensions are full.
-      if (energyLevel === "CRITICAL") {
+      if (task && task.type === "transfer_spawn") {
+        const target = Game.getObjectById(task.targetId as Id<Structure>);
+        if (target) {
+          candidates.push({
+            target: target,
+            priority: 200,
+            type: "spawn_ext",
+            pos: target.pos,
+            visual: { stroke: "#ffffff" },
+          });
+        }
+      }
+
+      // If CRITICAL, we only care about Spawn/Extensions.
+      // But if Brain didn't find them (maybe due to logic), we scan manually to be safe.
+      if (energyLevel === "CRITICAL" || candidates.length === 0) {
         const extensions = this.creep.room.find(FIND_MY_STRUCTURES, {
           filter: (s) =>
             (s.structureType === STRUCTURE_SPAWN ||
               s.structureType === STRUCTURE_EXTENSION) &&
             s.store.getFreeCapacity(RESOURCE_ENERGY) > 0,
         });
-        if (extensions.length > 0) {
-          const target = this.creep.pos.findClosestByPath(extensions);
-          if (target) {
-            if (
-              this.creep.transfer(target, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE
-            ) {
-              this.move(target, {
-                visualizePathStyle: { stroke: "#ffffff", strokeWidth: 0.5 },
-              });
-            }
-            return;
-          }
-        }
-      }
-
-      // 1. High Priority: Spawn / Extension (From Brain)
-      if (task && task.type === "transfer_spawn") {
-        const target = Game.getObjectById(task.targetId as Id<any>);
-        if (target) {
-          const result = this.creep.transfer(target, RESOURCE_ENERGY);
-          if (result === ERR_NOT_IN_RANGE) {
-            this.move(target as Structure | { pos: RoomPosition }, {
-              visualizePathStyle: { stroke: "#ffffff" },
+        extensions.forEach((ext) => {
+          // Avoid duplicates if Brain already found it
+          if (!candidates.find((c) => c.target.id === ext.id)) {
+            candidates.push({
+              target: ext,
+              priority: 200,
+              type: "spawn_ext",
+              pos: ext.pos,
+              visual: { stroke: "#ffffff" },
             });
           }
-          return;
-        }
+        });
       }
 
-      // 1.5 [NEW] High Priority Requests (Critical Builders)
-      // Respond to builders requesting energy for Critical Structures (Spawn/Extension/Tower)
-      // They set 'priorityRequest' flag.
-      const priorityBuilders = this.creep.room.find(FIND_MY_CREEPS, {
-        filter: (c) => c.memory.role === "builder" && c.memory.priorityRequest,
-      });
-
-      if (priorityBuilders.length > 0) {
-        const target = this.creep.pos.findClosestByPath(priorityBuilders);
-        if (target) {
-          if (
-            this.creep.transfer(target, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE
-          ) {
-            this.move(target, {
-              visualizePathStyle: { stroke: "#ff00ff", strokeWidth: 0.5 },
-            }); // Magenta for priority
-          }
-          return;
-        }
-      }
-
-      // 2. Medium Priority: Towers (Defense/Repair)
-      // Only fill towers if NOT in CRITICAL mode (unless tower is empty/danger)
+      // If NOT CRITICAL, add other targets
       if (energyLevel !== "CRITICAL") {
+        // 2. Priority Builders (Tag: priorityRequest) - Priority 150
+        const priorityBuilders = this.creep.room.find(FIND_MY_CREEPS, {
+          filter: (c) =>
+            c.memory.role === "builder" && c.memory.priorityRequest,
+        });
+        priorityBuilders.forEach((b) => {
+          candidates.push({
+            target: b,
+            priority: 150,
+            type: "priority_builder",
+            pos: b.pos,
+            visual: { stroke: "#ff00ff", strokeWidth: 0.5 }, // Magenta
+          });
+        });
+
+        // 3. Towers - Priority 120
         const towers = this.creep.room.find(FIND_STRUCTURES, {
           filter: (s) =>
             s.structureType === STRUCTURE_TOWER &&
             s.store.getFreeCapacity(RESOURCE_ENERGY) > 100,
         });
-        if (towers.length > 0) {
-          const target = this.creep.pos.findClosestByPath(towers);
-          if (target) {
-            if (
-              this.creep.transfer(target, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE
-            ) {
-              this.move(target, { visualizePathStyle: { stroke: "#ff0000" } });
-            }
-            return;
-          }
-        }
-      }
+        towers.forEach((t) => {
+          candidates.push({
+            target: t,
+            priority: 120,
+            type: "tower",
+            pos: t.pos,
+            visual: { stroke: "#ff0000" },
+          });
+        });
 
-      // 2.1 [NEW] Active Delivery to Upgraders (Low Energy)
-      // Only deliver if Upgrader is working and running low
-      // DISABLE in CRITICAL mode
-      if (energyLevel !== "CRITICAL") {
+        // 4. Upgraders (Active) - Priority 100
         const needyUpgraders = this.creep.room.find(FIND_MY_CREEPS, {
           filter: (c) =>
             c.memory.role === "upgrader" &&
             c.memory.working &&
             c.store.getFreeCapacity(RESOURCE_ENERGY) >
               c.store.getCapacity() * 0.5 &&
-            !c.pos.inRangeTo(this.creep.room.controller, 1), // Don't block controller spot? Actually fine.
+            !c.pos.inRangeTo(this.creep.room.controller, 1),
+        });
+        needyUpgraders.forEach((u) => {
+          candidates.push({
+            target: u,
+            priority: 100,
+            type: "upgrader",
+            pos: u.pos,
+            visual: { stroke: "#00ff00", opacity: 0.5 },
+          });
         });
 
-        if (needyUpgraders.length > 0) {
-          const target = this.creep.pos.findClosestByPath(needyUpgraders);
-          if (target) {
-            if (
-              this.creep.transfer(target, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE
-            ) {
-              this.move(target, {
-                visualizePathStyle: { stroke: "#00ff00", opacity: 0.5 },
-              });
-            }
-            return;
+        // 5. Builders (Standard) - Priority 80
+        const needyBuilders = this.creep.room.find(FIND_MY_CREEPS, {
+          filter: (c) =>
+            c.memory.role === "builder" &&
+            (c.memory.working || c.memory.requestingEnergy) &&
+            c.store[RESOURCE_ENERGY] < c.store.getCapacity() * 0.3,
+        });
+        needyBuilders.forEach((b) => {
+          // Avoid double adding if it was priority
+          if (!candidates.find((c) => c.target.id === b.id)) {
+            candidates.push({
+              target: b,
+              priority: 80,
+              type: "builder",
+              pos: b.pos,
+              visual: { stroke: "#ffff00", opacity: 0.5 },
+            });
           }
+        });
+
+        // 6. Sink Containers - Priority 50
+        const sources = this.creep.room.find(FIND_SOURCES);
+        const sinkContainers = this.creep.room.find(FIND_STRUCTURES, {
+          filter: (s) => {
+            if (s.structureType !== STRUCTURE_CONTAINER) return false;
+            if (s.store.getFreeCapacity(RESOURCE_ENERGY) === 0) return false;
+
+            // Filter out Source Containers (Range <= 2)
+            for (const source of sources) {
+              if (s.pos.inRangeTo(source, 2)) return false;
+            }
+
+            // Check if near Controller (Range 3) or Spawn (Range 3)
+            const nearController =
+              this.creep.room.controller &&
+              s.pos.inRangeTo(this.creep.room.controller, 3);
+            const nearSpawn = s.pos.findInRange(FIND_MY_SPAWNS, 3).length > 0;
+
+            return nearController || nearSpawn;
+          },
+        });
+        sinkContainers.forEach((s) => {
+          candidates.push({
+            target: s,
+            priority: 50,
+            type: "container",
+            pos: s.pos,
+            visual: { stroke: "#00ffff" },
+          });
+        });
+
+        // 7. Storage - Priority 10
+        if (
+          this.creep.room.storage &&
+          this.creep.room.storage.store.getFreeCapacity(RESOURCE_ENERGY) > 0
+        ) {
+          candidates.push({
+            target: this.creep.room.storage,
+            priority: 10,
+            type: "storage",
+            pos: this.creep.room.storage.pos,
+            visual: { stroke: "#ffffff", opacity: 0.3 },
+          });
         }
       }
 
-      // 2.2 [NEW] Active Delivery to Builders (Critical Projects)
-      // Check if any builder is requesting energy or is working on critical site
-      const needyBuilders = this.creep.room.find(FIND_MY_CREEPS, {
-        filter: (c) =>
-          c.memory.role === "builder" &&
-          (c.memory.working || c.memory.requestingEnergy) &&
-          c.store[RESOURCE_ENERGY] < c.store.getCapacity() * 0.3,
-      });
+      // === SCORING & SELECTION ===
+      if (candidates.length > 0) {
+        // Score = Priority - Distance
+        // This allows a closer lower priority target to win if the difference is large enough,
+        // BUT since our priority gaps are large (20-30 points), it mostly respects priority tiers
+        // unless the distance difference is extreme.
+        const bestCandidate = candidates.reduce(
+          (best, current) => {
+            const dist = this.creep.pos.getRangeTo(current.pos);
+            const score = current.priority - dist * 1.0; // Distance Penalty Factor 1.0
 
-      if (needyBuilders.length > 0) {
-        const target = this.creep.pos.findClosestByPath(needyBuilders);
-        if (target) {
+            if (!best || score > best.score) {
+              return { candidate: current, score: score };
+            }
+            return best;
+          },
+          null as { candidate: Candidate; score: number } | null,
+        );
+
+        if (bestCandidate) {
+          const target = bestCandidate.candidate.target;
           if (
             this.creep.transfer(target, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE
           ) {
             this.move(target, {
-              visualizePathStyle: { stroke: "#ffff00", opacity: 0.5 },
+              visualizePathStyle: bestCandidate.candidate.visual,
             });
           }
           return;
-        }
-      }
-
-      // 3. User Request: Controller Container & Spawn Container
-      // Find containers that are NOT near sources (Sink Containers)
-      const sources = this.creep.room.find(FIND_SOURCES);
-      const sinkContainers = this.creep.room.find(FIND_STRUCTURES, {
-        filter: (s) => {
-          if (s.structureType !== STRUCTURE_CONTAINER) return false;
-          if (s.store.getFreeCapacity(RESOURCE_ENERGY) === 0) return false;
-
-          // Filter out Source Containers (Range <= 2)
-          // Optimization: Cache this check or assume naming convention?
-          // For now, geometry check.
-          for (const source of sources) {
-            if (s.pos.inRangeTo(source, 2)) return false;
-          }
-
-          // Check if near Controller (Range 3) or Spawn (Range 3)
-          const nearController =
-            this.creep.room.controller &&
-            s.pos.inRangeTo(this.creep.room.controller, 3);
-          const nearSpawn = s.pos.findInRange(FIND_MY_SPAWNS, 3).length > 0;
-
-          return nearController || nearSpawn;
-        },
-      });
-
-      if (sinkContainers.length > 0) {
-        const target = this.creep.pos.findClosestByPath(sinkContainers);
-        if (target) {
-          if (
-            this.creep.transfer(target, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE
-          ) {
-            this.move(target, { visualizePathStyle: { stroke: "#00ffff" } });
-          }
-          return;
-        }
-      }
-
-      // 4. Fallback: Storage
-      if (this.creep.room.storage) {
-        if (
-          this.creep.transfer(this.creep.room.storage, RESOURCE_ENERGY) ===
-          ERR_NOT_IN_RANGE
-        ) {
-          this.move(this.creep.room.storage);
         }
       }
     } else {
