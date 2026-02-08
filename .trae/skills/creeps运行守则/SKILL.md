@@ -64,7 +64,7 @@ description: "强制执行 Creep 的基于角色的约束。在定义、调试�
 - **优先级系统**：严格遵循 `PriorityModule` (Spawn > Tower > Container > Extension > Wall > Road)。
 - **智能获取**：
   - 同 Upgrader，优先利用掉落物或容器。
-  - 当能量耗尽且在进行关键建设时，发出 `requestingEnergy` 信号，获得 Hauler 的优先配送。
+  - 当能量耗尽且在进行关键建设时，发出 `requestingEnergy` 信号，获得 Hauler 的优先配送（优先级大于升级者）。
 - **强制工作**：如果尝试取能失败但背包内有剩余能量，**必须**强制开始工作。
 
 ## 实现指南 (Implementation Guidelines)

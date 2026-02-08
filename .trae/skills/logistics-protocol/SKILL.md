@@ -16,10 +16,11 @@ This skill defines the standard operating procedures for energy logistics within
 
 ### Sinks (Consumers)
 *   **Tier 1 (Critical)**: Spawn, Extensions (Survival).
+*   **Tier 1.5 (Priority Construction)**: Builders working on Critical Structures (Spawn/Extension/Tower) with `priorityRequest` active.
 *   **Tier 2 (Defense)**: Towers (Energy < 500).
 *   **Tier 3 (Active Support)**:
     *   **Upgraders**: When energy < 50% and actively working.
-    *   **Builders**: When energy < 50% and building Critical Structures (Spawn/Extension).
+    *   **Builders**: When energy < 50% (Standard active delivery).
 *   **Tier 4 (Storage)**: Storage, Terminal (Surplus).
 *   **Tier 5 (Buffer)**: General Containers, Controller Link.
 
@@ -39,16 +40,22 @@ Haulers are authorized to deliver directly to working Creeps under the following
 
 Creeps (Upgraders/Builders) can signal distress/need via Memory:
 
+### Standard Request (Panic Mode)
 *   **Signal**: Set `memory.requestingEnergy = true`.
+*   **Condition**: Energy == 0, no nearby supply.
+*   **Response**: Standard Hauler delivery (Tier 3).
+
+### Priority Request (Smart Supply)
+*   **Signal**: Set `memory.requestingEnergy = true` AND `memory.priorityRequest = true`.
+*   **Tagging**: Builder tags job type in `memory.targetStructType` (e.g., "spawn", "extension").
 *   **Condition**:
-    *   Energy == 0.
-    *   No Containers/Storage within Range 5.
-    *   Distance to Source > 10.
-*   **Response**:
-    *   Haulers scan for this flag.
-    *   Upon assigning a Hauler, the Hauler may (optionally) set `memory.targetCreep = <id>` to prevent double-booking, though simple competition is often sufficient.
-*   **Termination**:
-    *   Creep clears flag when `store.getFreeCapacity() == 0` or energy > 50%.
+    *   Role is **Builder**.
+    *   Target is **Critical** (Spawn/Extension/Tower).
+    *   Energy < **30%**.
+*   **Response**: Haulers treat this as Tier 1.5 priority, overriding Towers and Upgraders.
+
+### Termination
+*   Creep clears flags when `store.getFreeCapacity() == 0`.
 
 ## 4. Anti-Starvation Rules
 

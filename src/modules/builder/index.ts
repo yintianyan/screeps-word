@@ -19,14 +19,35 @@ export default class Builder extends Role {
       const sites = this.creep.room.find(FIND_CONSTRUCTION_SITES);
       const bestSite = priorityModule.getBestTarget(sites, this.creep.pos);
 
-      if (
-        bestSite &&
-        (bestSite.structureType === STRUCTURE_SPAWN ||
-          bestSite.structureType === STRUCTURE_EXTENSION ||
-          bestSite.structureType === STRUCTURE_TOWER)
-      ) {
-        isCriticalTask = true;
+      if (bestSite) {
+        // [NEW] Tag the work type
+        this.memory.targetStructType = bestSite.structureType;
+
+        if (
+            bestSite.structureType === STRUCTURE_SPAWN ||
+            bestSite.structureType === STRUCTURE_EXTENSION ||
+            bestSite.structureType === STRUCTURE_TOWER
+        ) {
+            isCriticalTask = true;
+        }
+
+        // [NEW] Early Request Logic
+        // If critical task and energy < 30%, request delivery immediately
+        if (isCriticalTask && this.creep.store[RESOURCE_ENERGY] < this.creep.store.getCapacity() * 0.3) {
+            this.memory.requestingEnergy = true;
+            this.memory.priorityRequest = true;
+            this.creep.say("📡 urgent");
+        } else if (this.creep.store.getFreeCapacity() === 0) {
+             // Clear flags if full
+             delete this.memory.requestingEnergy;
+             delete this.memory.priorityRequest;
+        }
+      } else {
+          delete this.memory.targetStructType;
       }
+    } else {
+        // Not working (Gathering), clear priority if not empty (safety)
+        // Actually, if gathering, we keep requestingEnergy if we set it.
     }
 
     if (isCrisis && !isCriticalTask) {

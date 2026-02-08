@@ -78,6 +78,27 @@ export default class Hauler extends Role {
         }
       }
 
+      // 1.5 [NEW] High Priority Requests (Critical Builders)
+      // Respond to builders requesting energy for Critical Structures (Spawn/Extension/Tower)
+      // They set 'priorityRequest' flag.
+      const priorityBuilders = this.creep.room.find(FIND_MY_CREEPS, {
+        filter: (c) => c.memory.role === "builder" && c.memory.priorityRequest,
+      });
+
+      if (priorityBuilders.length > 0) {
+        const target = this.creep.pos.findClosestByPath(priorityBuilders);
+        if (target) {
+          if (
+            this.creep.transfer(target, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE
+          ) {
+            this.move(target, {
+              visualizePathStyle: { stroke: "#ff00ff", strokeWidth: 0.5 },
+            }); // Magenta for priority
+          }
+          return;
+        }
+      }
+
       // 2. Medium Priority: Towers (Defense/Repair)
       // Only fill towers if NOT in CRITICAL mode (unless tower is empty/danger)
       if (energyLevel !== "CRITICAL") {

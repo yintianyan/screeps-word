@@ -3049,6 +3049,23 @@ class Hauler extends Role {
                     return;
                 }
             }
+            // 1.5 [NEW] High Priority Requests (Critical Builders)
+            // Respond to builders requesting energy for Critical Structures (Spawn/Extension/Tower)
+            // They set 'priorityRequest' flag.
+            const priorityBuilders = this.creep.room.find(FIND_MY_CREEPS, {
+                filter: (c) => c.memory.role === "builder" && c.memory.priorityRequest,
+            });
+            if (priorityBuilders.length > 0) {
+                const target = this.creep.pos.findClosestByPath(priorityBuilders);
+                if (target) {
+                    if (this.creep.transfer(target, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
+                        this.move(target, {
+                            visualizePathStyle: { stroke: "#ff00ff", strokeWidth: 0.5 },
+                        }); // Magenta for priority
+                    }
+                    return;
+                }
+            }
             // 2. Medium Priority: Towers (Defense/Repair)
             // Only fill towers if NOT in CRITICAL mode (unless tower is empty/danger)
             if (energyLevel !== "CRITICAL") {
@@ -3244,11 +3261,23 @@ class Upgrader extends Role {
                 // If no container nearby, signal Haulers
                 this.memory.requestingEnergy = true;
                 this.creep.say("📡 help");
-                // While waiting, try to harvest if very desperate or early game
-                if (this.creep.room.energyAvailable < 300 || !this.creep.room.storage) {
-                    const source = this.creep.pos.findClosestByPath(FIND_SOURCES);
-                    if (source && this.creep.harvest(source) === ERR_NOT_IN_RANGE) {
-                        this.move(source);
+                // Optimize: Move towards the nearest Hauler with energy to meet halfway
+                const hauler = this.creep.pos.findClosestByPath(FIND_MY_CREEPS, {
+                    filter: (c) => c.memory.role === 'hauler' && c.store[RESOURCE_ENERGY] > 0
+                });
+                if (hauler) {
+                    // Only move if not in range to transfer (Range 1)
+                    if (!this.creep.pos.inRangeTo(hauler, 1)) {
+                        this.move(hauler, { visualizePathStyle: { stroke: "#00ff00", lineStyle: 'dashed', opacity: 0.5 } });
+                    }
+                }
+                else {
+                    // While waiting, try to harvest if very desperate or early game
+                    if (this.creep.room.energyAvailable < 300 || !this.creep.room.storage) {
+                        const source = this.creep.pos.findClosestByPath(FIND_SOURCES);
+                        if (source && this.creep.harvest(source) === ERR_NOT_IN_RANGE) {
+                            this.move(source);
+                        }
                     }
                 }
             }
@@ -3271,11 +3300,29 @@ class Builder extends Role {
             // Use priority module to find the best target
             const sites = this.creep.room.find(FIND_CONSTRUCTION_SITES);
             const bestSite = priorityModule.getBestTarget(sites, this.creep.pos);
-            if (bestSite &&
-                (bestSite.structureType === STRUCTURE_SPAWN ||
+            if (bestSite) {
+                // [NEW] Tag the work type
+                this.memory.targetStructType = bestSite.structureType;
+                if (bestSite.structureType === STRUCTURE_SPAWN ||
                     bestSite.structureType === STRUCTURE_EXTENSION ||
-                    bestSite.structureType === STRUCTURE_TOWER)) {
-                isCriticalTask = true;
+                    bestSite.structureType === STRUCTURE_TOWER) {
+                    isCriticalTask = true;
+                }
+                // [NEW] Early Request Logic
+                // If critical task and energy < 30%, request delivery immediately
+                if (isCriticalTask && this.creep.store[RESOURCE_ENERGY] < this.creep.store.getCapacity() * 0.3) {
+                    this.memory.requestingEnergy = true;
+                    this.memory.priorityRequest = true;
+                    this.creep.say("📡 urgent");
+                }
+                else if (this.creep.store.getFreeCapacity() === 0) {
+                    // Clear flags if full
+                    delete this.memory.requestingEnergy;
+                    delete this.memory.priorityRequest;
+                }
+            }
+            else {
+                delete this.memory.targetStructType;
             }
         }
         if (isCrisis && !isCriticalTask) {
@@ -3343,7 +3390,8 @@ class Builder extends Role {
             const target = this.creep.pos.findClosestByPath(FIND_STRUCTURES, {
                 filter: (s) => (s.structureType === STRUCTURE_CONTAINER ||
                     s.structureType === STRUCTURE_STORAGE) &&
-                    s.store[RESOURCE_ENERGY] > 0,
+                    s.store[RESOURCE_ENERGY] >
+                        0,
             });
             if (target) {
                 // Clear request flag if we found a target
@@ -3358,10 +3406,28 @@ class Builder extends Role {
                 // If no container nearby, signal Haulers
                 this.memory.requestingEnergy = true;
                 this.creep.say("📡 help");
-                // Harvest fallback (only if desperate or early game)
-                const source = this.creep.pos.findClosestByPath(FIND_SOURCES);
-                if (source && this.creep.harvest(source) === ERR_NOT_IN_RANGE) {
-                    this.move(source);
+                // Optimize: Move towards the nearest Hauler with energy to meet halfway
+                const hauler = this.creep.pos.findClosestByPath(FIND_MY_CREEPS, {
+                    filter: (c) => c.memory.role === "hauler" && c.store[RESOURCE_ENERGY] > 0,
+                });
+                if (hauler) {
+                    // Only move if not in range to transfer (Range 1)
+                    if (!this.creep.pos.inRangeTo(hauler, 1)) {
+                        this.move(hauler, {
+                            visualizePathStyle: {
+                                stroke: "#00ff00",
+                                lineStyle: "dashed",
+                                opacity: 0.5,
+                            },
+                        });
+                    }
+                }
+                else {
+                    // Harvest fallback (only if desperate or early game)
+                    const source = this.creep.pos.findClosestByPath(FIND_SOURCES);
+                    if (source && this.creep.harvest(source) === ERR_NOT_IN_RANGE) {
+                        this.move(source);
+                    }
                 }
             }
         }
