@@ -1,0 +1,41 @@
+import Kernel from "./ai/kernel";
+import populationModule from "./components/populationManager";
+import structurePlanner from "./modules/builder/structurePlanner";
+import towerModule from "./modules/defender/tower";
+import monitorModule from "./components/monitor";
+import spawnerModule from "./components/spawnManager";
+import creepsModule from "./components/creepManager";
+import trafficModule from "./components/trafficManager";
+import Lifecycle from "./components/roomManager";
+import brainModule from "./ai/brainModule";
+
+// === 注册模块 ===
+
+// 0. 大脑决策 - 房间级别 (最优先)
+Kernel.register("brain", brainModule);
+
+// 1. 核心逻辑 (人口 & 孵化) - 房间级别
+Kernel.register("population", populationModule); // 仅计算
+Kernel.register("lifecycle", Lifecycle); // 生命周期监控
+Kernel.register("spawner", spawnerModule); // 孵化执行
+
+// 2. 规划与建造 - 房间级别
+Kernel.register("planner", structurePlanner);
+
+// 3. 防御与监控 - 房间级别
+Kernel.register("tower", towerModule);
+Kernel.register("monitor", monitorModule);
+Kernel.register("traffic", trafficModule);
+
+// 4. 全局逻辑 - 全局级别
+Kernel.register("creeps", creepsModule, "global");
+
+export const loop = function () {
+  // 运行内核
+  Kernel.run();
+
+  // 可选：定期打印内核统计报告
+  if (Game.time % 20 === 0) {
+    // console.log(Kernel.getReport());
+  }
+};
