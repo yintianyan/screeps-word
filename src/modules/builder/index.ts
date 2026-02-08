@@ -24,30 +24,34 @@ export default class Builder extends Role {
         this.memory.targetStructType = bestSite.structureType;
 
         if (
-            bestSite.structureType === STRUCTURE_SPAWN ||
-            bestSite.structureType === STRUCTURE_EXTENSION ||
-            bestSite.structureType === STRUCTURE_TOWER
+          bestSite.structureType === STRUCTURE_SPAWN ||
+          bestSite.structureType === STRUCTURE_EXTENSION ||
+          bestSite.structureType === STRUCTURE_TOWER
         ) {
-            isCriticalTask = true;
+          isCriticalTask = true;
         }
 
         // [NEW] Early Request Logic
         // If critical task and energy < 30%, request delivery immediately
-        if (isCriticalTask && this.creep.store[RESOURCE_ENERGY] < this.creep.store.getCapacity() * 0.3) {
-            this.memory.requestingEnergy = true;
-            this.memory.priorityRequest = true;
-            this.creep.say("📡 urgent");
+        if (
+          isCriticalTask &&
+          this.creep.store[RESOURCE_ENERGY] <
+            this.creep.store.getCapacity() * 0.3
+        ) {
+          this.memory.requestingEnergy = true;
+          this.memory.priorityRequest = true;
+          this.creep.say("📡 urgent");
         } else if (this.creep.store.getFreeCapacity() === 0) {
-             // Clear flags if full
-             delete this.memory.requestingEnergy;
-             delete this.memory.priorityRequest;
+          // Clear flags if full
+          delete this.memory.requestingEnergy;
+          delete this.memory.priorityRequest;
         }
       } else {
-          delete this.memory.targetStructType;
+        delete this.memory.targetStructType;
       }
     } else {
-        // Not working (Gathering), clear priority if not empty (safety)
-        // Actually, if gathering, we keep requestingEnergy if we set it.
+      // Not working (Gathering), clear priority if not empty (safety)
+      // Actually, if gathering, we keep requestingEnergy if we set it.
     }
 
     if (isCrisis && !isCriticalTask) {
@@ -147,30 +151,53 @@ export default class Builder extends Role {
         this.creep.say("📡 help");
 
         // Optimize: Move towards the nearest Hauler with energy to meet halfway
-        const hauler = this.creep.pos.findClosestByPath(FIND_MY_CREEPS, {
-            filter: (c) => c.memory.role === 'hauler' && c.store[RESOURCE_ENERGY] > 0
-        });
 
-        if (hauler) {
-            // Only move if not in range to transfer (Range 1)
-            // Stop moving if range is 1 to avoid dancing
-            const range = this.creep.pos.getRangeTo(hauler);
-            if (range > 1) {
-                this.move(hauler, { visualizePathStyle: { stroke: "#00ff00", lineStyle: 'dashed', opacity: 0.5 } });
-            }
+        // 1. Check if any Hauler has targeted ME directly (True Love)
+        const myHauler = this.creep.room.find(FIND_MY_CREEPS, {
+          filter: (c) =>
+            c.memory.role === "hauler" && c.memory.targetId === this.creep.id,
+        })[0];
+
+        let targetHauler = myHauler;
+
+        // 2. If no dedicated hauler, find closest one with energy (Fallback)
+        if (!targetHauler) {
+          targetHauler = this.creep.pos.findClosestByRange(FIND_MY_CREEPS, {
+            filter: (c) =>
+              c.memory.role === "hauler" && c.store[RESOURCE_ENERGY] > 0,
+          });
+        }
+
+        if (targetHauler) {
+          // Only move if not in range to transfer (Range 1)
+          // Stop moving if range is 1 to avoid dancing
+          const range = this.creep.pos.getRangeTo(targetHauler);
+          if (range > 1) {
+            this.move(targetHauler, {
+              visualizePathStyle: {
+                stroke: "#00ff00",
+                lineStyle: "dashed",
+                opacity: 0.5,
+              },
+            });
+            this.creep.say(myHauler ? "😍 meeting" : "🏃 chasing");
+          }
         } else {
-             // Harvest fallback (only if desperate or early game)
-             // Only if NO haulers exist or are dead
-             const haulersExist = this.creep.room.find(FIND_MY_CREEPS, { filter: (c) => c.memory.role === 'hauler' }).length > 0;
-             if (!haulersExist) {
-                const source = this.creep.pos.findClosestByPath(FIND_SOURCES);
-                if (source && this.creep.harvest(source) === ERR_NOT_IN_RANGE) {
-                  this.move(source);
-                }
-             } else {
-                 // Wait for hauler (idle)
-                 this.creep.say("⏳ waiting");
-             }
+          // Harvest fallback (only if desperate or early game)
+          // Only if NO haulers exist or are dead
+          const haulersExist =
+            this.creep.room.find(FIND_MY_CREEPS, {
+              filter: (c) => c.memory.role === "hauler",
+            }).length > 0;
+          if (!haulersExist) {
+            const source = this.creep.pos.findClosestByPath(FIND_SOURCES);
+            if (source && this.creep.harvest(source) === ERR_NOT_IN_RANGE) {
+              this.move(source);
+            }
+          } else {
+            // Wait for hauler (idle)
+            this.creep.say("⏳ waiting");
+          }
         }
       }
     }

@@ -25,7 +25,7 @@ export default class Upgrader extends Role {
       });
       if (dropped) {
         if (this.creep.pickup(dropped) === ERR_NOT_IN_RANGE) {
-           this.move(dropped, { visualizePathStyle: { stroke: "#ffaa00" } });
+          this.move(dropped, { visualizePathStyle: { stroke: "#ffaa00" } });
         }
         return;
       }
@@ -42,10 +42,12 @@ export default class Upgrader extends Role {
       let target = null;
       if (canWithdraw) {
         target = this.creep.pos.findClosestByPath(FIND_STRUCTURES, {
-            filter: (s) =>
+          filter: (s) =>
             (s.structureType === STRUCTURE_CONTAINER ||
-                s.structureType === STRUCTURE_STORAGE) &&
-            (s as StructureContainer | StructureStorage).store[RESOURCE_ENERGY] > 0,
+              s.structureType === STRUCTURE_STORAGE) &&
+            (s as StructureContainer | StructureStorage).store[
+              RESOURCE_ENERGY
+            ] > 0,
         });
       }
 
@@ -61,30 +63,56 @@ export default class Upgrader extends Role {
         // If no container nearby, signal Haulers
         this.memory.requestingEnergy = true;
         this.creep.say("📡 help");
-        
-        // Optimize: Move towards the nearest Hauler with energy to meet halfway
-        const hauler = this.creep.pos.findClosestByPath(FIND_MY_CREEPS, {
-            filter: (c) => c.memory.role === 'hauler' && c.store[RESOURCE_ENERGY] > 0
-        });
 
-        if (hauler) {
-            // Only move if not in range to transfer (Range 1)
-            const range = this.creep.pos.getRangeTo(hauler);
-            if (range > 1) {
-                 this.move(hauler, { visualizePathStyle: { stroke: "#00ff00", lineStyle: 'dashed', opacity: 0.5 } });
-            }
+        // Optimize: Move towards the nearest Hauler with energy to meet halfway
+
+        // 1. Check if any Hauler has targeted ME directly (True Love)
+        const myHauler = this.creep.room.find(FIND_MY_CREEPS, {
+          filter: (c) =>
+            c.memory.role === "hauler" && c.memory.targetId === this.creep.id,
+        })[0];
+
+        let targetHauler = myHauler;
+
+        // 2. If no dedicated hauler, find closest one with energy (Fallback)
+        if (!targetHauler) {
+          targetHauler = this.creep.pos.findClosestByRange(FIND_MY_CREEPS, {
+            filter: (c) =>
+              c.memory.role === "hauler" && c.store[RESOURCE_ENERGY] > 0,
+          });
+        }
+
+        if (targetHauler) {
+          // Only move if not in range to transfer (Range 1)
+          const range = this.creep.pos.getRangeTo(targetHauler);
+          if (range > 1) {
+            this.move(targetHauler, {
+              visualizePathStyle: {
+                stroke: "#00ff00",
+                lineStyle: "dashed",
+                opacity: 0.5,
+              },
+            });
+            this.creep.say(myHauler ? "😍 meeting" : "🏃 chasing");
+          }
         } else {
-            // While waiting, try to harvest if very desperate or early game
-            // Only if NO haulers exist
-            const haulersExist = this.creep.room.find(FIND_MY_CREEPS, { filter: (c) => c.memory.role === 'hauler' }).length > 0;
-            if (this.creep.room.energyAvailable < 300 || (!this.creep.room.storage && !haulersExist)) {
-                 const source = this.creep.pos.findClosestByPath(FIND_SOURCES);
-                 if (source && this.creep.harvest(source) === ERR_NOT_IN_RANGE) {
-                   this.move(source);
-                 }
-            } else {
-                 this.creep.say("⏳ waiting");
+          // While waiting, try to harvest if very desperate or early game
+          // Only if NO haulers exist
+          const haulersExist =
+            this.creep.room.find(FIND_MY_CREEPS, {
+              filter: (c) => c.memory.role === "hauler",
+            }).length > 0;
+          if (
+            this.creep.room.energyAvailable < 300 ||
+            (!this.creep.room.storage && !haulersExist)
+          ) {
+            const source = this.creep.pos.findClosestByPath(FIND_SOURCES);
+            if (source && this.creep.harvest(source) === ERR_NOT_IN_RANGE) {
+              this.move(source);
             }
+          } else {
+            this.creep.say("⏳ waiting");
+          }
         }
       }
     }

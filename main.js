@@ -3167,6 +3167,8 @@ class Hauler extends Role {
                 }, null);
                 if (bestCandidate) {
                     const target = bestCandidate.candidate.target;
+                    // [NEW] Announce target so others know I'm coming
+                    this.memory.targetId = target.id;
                     if (this.creep.transfer(target, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
                         this.move(target, {
                             visualizePathStyle: bestCandidate.candidate.visual,
@@ -3274,21 +3276,39 @@ class Upgrader extends Role {
                 this.memory.requestingEnergy = true;
                 this.creep.say("📡 help");
                 // Optimize: Move towards the nearest Hauler with energy to meet halfway
-                const hauler = this.creep.pos.findClosestByPath(FIND_MY_CREEPS, {
-                    filter: (c) => c.memory.role === 'hauler' && c.store[RESOURCE_ENERGY] > 0
-                });
-                if (hauler) {
+                // 1. Check if any Hauler has targeted ME directly (True Love)
+                const myHauler = this.creep.room.find(FIND_MY_CREEPS, {
+                    filter: (c) => c.memory.role === "hauler" && c.memory.targetId === this.creep.id,
+                })[0];
+                let targetHauler = myHauler;
+                // 2. If no dedicated hauler, find closest one with energy (Fallback)
+                if (!targetHauler) {
+                    targetHauler = this.creep.pos.findClosestByRange(FIND_MY_CREEPS, {
+                        filter: (c) => c.memory.role === "hauler" && c.store[RESOURCE_ENERGY] > 0,
+                    });
+                }
+                if (targetHauler) {
                     // Only move if not in range to transfer (Range 1)
-                    const range = this.creep.pos.getRangeTo(hauler);
+                    const range = this.creep.pos.getRangeTo(targetHauler);
                     if (range > 1) {
-                        this.move(hauler, { visualizePathStyle: { stroke: "#00ff00", lineStyle: 'dashed', opacity: 0.5 } });
+                        this.move(targetHauler, {
+                            visualizePathStyle: {
+                                stroke: "#00ff00",
+                                lineStyle: "dashed",
+                                opacity: 0.5,
+                            },
+                        });
+                        this.creep.say(myHauler ? "😍 meeting" : "🏃 chasing");
                     }
                 }
                 else {
                     // While waiting, try to harvest if very desperate or early game
                     // Only if NO haulers exist
-                    const haulersExist = this.creep.room.find(FIND_MY_CREEPS, { filter: (c) => c.memory.role === 'hauler' }).length > 0;
-                    if (this.creep.room.energyAvailable < 300 || (!this.creep.room.storage && !haulersExist)) {
+                    const haulersExist = this.creep.room.find(FIND_MY_CREEPS, {
+                        filter: (c) => c.memory.role === "hauler",
+                    }).length > 0;
+                    if (this.creep.room.energyAvailable < 300 ||
+                        (!this.creep.room.storage && !haulersExist)) {
                         const source = this.creep.pos.findClosestByPath(FIND_SOURCES);
                         if (source && this.creep.harvest(source) === ERR_NOT_IN_RANGE) {
                             this.move(source);
@@ -3328,7 +3348,9 @@ class Builder extends Role {
                 }
                 // [NEW] Early Request Logic
                 // If critical task and energy < 30%, request delivery immediately
-                if (isCriticalTask && this.creep.store[RESOURCE_ENERGY] < this.creep.store.getCapacity() * 0.3) {
+                if (isCriticalTask &&
+                    this.creep.store[RESOURCE_ENERGY] <
+                        this.creep.store.getCapacity() * 0.3) {
                     this.memory.requestingEnergy = true;
                     this.memory.priorityRequest = true;
                     this.creep.say("📡 urgent");
@@ -3425,21 +3447,38 @@ class Builder extends Role {
                 this.memory.requestingEnergy = true;
                 this.creep.say("📡 help");
                 // Optimize: Move towards the nearest Hauler with energy to meet halfway
-                const hauler = this.creep.pos.findClosestByPath(FIND_MY_CREEPS, {
-                    filter: (c) => c.memory.role === 'hauler' && c.store[RESOURCE_ENERGY] > 0
-                });
-                if (hauler) {
+                // 1. Check if any Hauler has targeted ME directly (True Love)
+                const myHauler = this.creep.room.find(FIND_MY_CREEPS, {
+                    filter: (c) => c.memory.role === "hauler" && c.memory.targetId === this.creep.id,
+                })[0];
+                let targetHauler = myHauler;
+                // 2. If no dedicated hauler, find closest one with energy (Fallback)
+                if (!targetHauler) {
+                    targetHauler = this.creep.pos.findClosestByRange(FIND_MY_CREEPS, {
+                        filter: (c) => c.memory.role === "hauler" && c.store[RESOURCE_ENERGY] > 0,
+                    });
+                }
+                if (targetHauler) {
                     // Only move if not in range to transfer (Range 1)
                     // Stop moving if range is 1 to avoid dancing
-                    const range = this.creep.pos.getRangeTo(hauler);
+                    const range = this.creep.pos.getRangeTo(targetHauler);
                     if (range > 1) {
-                        this.move(hauler, { visualizePathStyle: { stroke: "#00ff00", lineStyle: 'dashed', opacity: 0.5 } });
+                        this.move(targetHauler, {
+                            visualizePathStyle: {
+                                stroke: "#00ff00",
+                                lineStyle: "dashed",
+                                opacity: 0.5,
+                            },
+                        });
+                        this.creep.say(myHauler ? "😍 meeting" : "🏃 chasing");
                     }
                 }
                 else {
                     // Harvest fallback (only if desperate or early game)
                     // Only if NO haulers exist or are dead
-                    const haulersExist = this.creep.room.find(FIND_MY_CREEPS, { filter: (c) => c.memory.role === 'hauler' }).length > 0;
+                    const haulersExist = this.creep.room.find(FIND_MY_CREEPS, {
+                        filter: (c) => c.memory.role === "hauler",
+                    }).length > 0;
                     if (!haulersExist) {
                         const source = this.creep.pos.findClosestByPath(FIND_SOURCES);
                         if (source && this.creep.harvest(source) === ERR_NOT_IN_RANGE) {

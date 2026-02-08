@@ -220,6 +220,10 @@ export default class Hauler extends Role {
 
         if (bestCandidate) {
           const target = bestCandidate.candidate.target;
+          
+          // [NEW] Announce target so others know I'm coming
+          this.memory.targetId = target.id;
+          
           if (
             this.creep.transfer(target, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE
           ) {
