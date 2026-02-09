@@ -109,6 +109,16 @@ const populationModule = {
       if (percentage < this.config.thresholds.high - 0.05) newLevel = "MEDIUM";
     }
 
+    // [New] Reserve Cap
+    // If we have no storage reserve (containers empty), do not allow HIGH level
+    // This prevents over-spawning when only Spawn is full but economy is fragile
+    if (totalEnergy < capacity + 1000) {
+      if (newLevel === "HIGH") newLevel = "MEDIUM";
+    }
+    if (totalEnergy < capacity + 200) {
+      if (newLevel === "MEDIUM") newLevel = "LOW";
+    }
+
     if (newLevel !== currentLevel) {
       room.memory.energyLevel = newLevel;
       console.log(
@@ -182,6 +192,17 @@ const populationModule = {
     // Get harvesters count for safety checks
     const harvesters = Cache.getCreepsByRole(room, "harvester").length;
 
+    // Check Container Reserves
+    const containers = Cache.getStructures(
+      room,
+      STRUCTURE_CONTAINER,
+    ) as StructureContainer[];
+    const containerEnergy = containers.reduce(
+      (sum, c) => sum + c.store[RESOURCE_ENERGY],
+      0,
+    );
+    const hasReserves = containerEnergy > 1000;
+
     // Analyze Task Loads
     const tasks = TaskManager.analyze(room);
 
@@ -225,12 +246,18 @@ const populationModule = {
       targets.upgrader = 1;
     } else if (level === "MEDIUM") {
       // Allow calculated targets, but cap upgrader
-      targets.upgrader = 2;
+      targets.upgrader = hasReserves ? 2 : 1; // Cap at 1 if no reserves
     } else if (level === "HIGH") {
       // Allow max
-      targets.upgrader = 3;
+      targets.upgrader = hasReserves ? 3 : 2; // Cap at 2 if no reserves
       // If no construction, boost upgrader
-      if (targets.builder === 0) targets.upgrader = 4;
+      if (targets.builder === 0) targets.upgrader = hasReserves ? 4 : 2;
+    }
+
+    // [New] Hard Cap if containers are empty (Anti-Starvation)
+    if (containerEnergy < 200 && containers.length > 0) {
+      targets.upgrader = 1;
+      targets.builder = Math.min(targets.builder, 1);
     }
 
     // Limits
