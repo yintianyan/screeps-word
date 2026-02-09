@@ -4,6 +4,8 @@ node_modules/
 # Build outputs
 dist/
 build/
+main.js
+main.js.map
 
 # Logs
 logs/
@@ -17,5 +19,3 @@ Thumbs.db
 # Screeps specific
 .screeps/
 
-main.js
-main.js.map

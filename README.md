@@ -83,7 +83,7 @@ npm install
 npm run build
 ```
 
-构建产物将输出到 `dist/` 目录（或根据 rollup 配置直接同步到 Screeps 目录）。
+构建产物将输出到根目录（可将此项目作为screeps world的default目录或根据 rollup 配置直接同步到 Screeps 目录）。
 
 ### 部署
 
