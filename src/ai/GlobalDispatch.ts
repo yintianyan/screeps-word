@@ -125,6 +125,22 @@ export class GlobalDispatch {
       const queue = Memory.dispatch.queues[priority];
       if (queue.length === 0) continue;
 
+      // [Optimization] Sort tasks within the same priority!
+      // This is crucial. If we have multiple HIGH priority pickup tasks,
+      // we want the one with MORE energy to be processed first.
+
+      // Let's sort the queue based on data.amount if available (descending)
+      // Only sort if it's likely to be a transport queue (HIGH/NORMAL)
+      if (priority === TaskPriority.HIGH || priority === TaskPriority.NORMAL) {
+        queue.sort((idA, idB) => {
+          const taskA = Memory.dispatch.tasks[idA];
+          const taskB = Memory.dispatch.tasks[idB];
+          const amountA = taskA?.data?.amount || 0;
+          const amountB = taskB?.data?.amount || 0;
+          return amountB - amountA; // Descending
+        });
+      }
+
       // Try to assign tasks in this queue
       for (let i = 0; i < queue.length; i++) {
         const taskId = queue[i];
@@ -190,17 +206,19 @@ export class GlobalDispatch {
 
     if (candidates.length === 0) return null;
 
-    // Sort by Score (Distance + Role Match)
+    // Sort by Score (Distance + Role Match + Energy Weight)
     return candidates.sort((a, b) => {
-      // Prefer closer creeps
+      // 1. Role Match (Primary)
+      const roleMatchA = task.validRoles?.includes(a.memory.role) ? 100 : 0;
+      const roleMatchB = task.validRoles?.includes(b.memory.role) ? 100 : 0;
+
+      // 2. Distance Score (Lower is better)
       const distA = a.pos.getRangeTo(task.pos);
       const distB = b.pos.getRangeTo(task.pos);
+      const distScoreA = Math.max(0, 50 - distA); // 50 points for distance 0
+      const distScoreB = Math.max(0, 50 - distB);
 
-      // Prefer role match
-      const roleMatchA = task.validRoles?.includes(a.memory.role) ? -10 : 0;
-      const roleMatchB = task.validRoles?.includes(b.memory.role) ? -10 : 0;
-
-      return distA + roleMatchA - (distB + roleMatchB);
+      return roleMatchB + distScoreB - (roleMatchA + distScoreA);
     })[0];
   }
 }

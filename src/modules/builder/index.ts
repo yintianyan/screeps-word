@@ -164,6 +164,13 @@ export default class Builder extends Role {
             0,
       });
 
+      // [ACTIVE DELIVERY CHECK]
+      const haulers = this.creep.room.find(FIND_MY_CREEPS, {
+        filter: (c) => c.memory.role === "hauler" && c.ticksToLive > 50,
+      });
+      const hasActiveHaulers = haulers.length > 0;
+      const shouldWait = hasActiveHaulers && !target;
+
       if (target) {
         // Clear request flag if we found a target
         if (this.memory.requestingEnergy) delete this.memory.requestingEnergy;
@@ -171,15 +178,14 @@ export default class Builder extends Role {
         if (this.creep.withdraw(target, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
           this.move(target, { visualizePathStyle: { stroke: "#ffaa00" } });
         }
-      } else {
+      } else if (shouldWait) {
         // === REQUEST DELIVERY ===
         // If no container nearby, signal Haulers
         this.memory.requestingEnergy = true;
         this.creep.say("📡 help");
 
         // Optimize: Move towards the nearest Hauler with energy to meet halfway
-
-        // 1. Check if any Hauler has targeted ME directly (True Love)
+        // ... (Existing logic) ...
         const myHauler = this.creep.room.find(FIND_MY_CREEPS, {
           filter: (c) =>
             c.memory.role === "hauler" && c.memory.targetId === this.creep.id,
@@ -200,7 +206,6 @@ export default class Builder extends Role {
           this.memory.waitTicks = 0;
 
           // Only move if not in range to transfer (Range 1)
-          // Stop moving if range is 1 to avoid dancing
           const range = this.creep.pos.getRangeTo(targetHauler);
           if (range > 1) {
             this.move(targetHauler, {
@@ -213,27 +218,23 @@ export default class Builder extends Role {
             this.creep.say(myHauler ? "😍 meeting" : "🏃 chasing");
           }
         } else {
-          // Harvest fallback (only if desperate or early game)
-          // Only if NO haulers exist or are dead OR we have waited too long
-          const haulersExist =
-            this.creep.room.find(FIND_MY_CREEPS, {
-              filter: (c) => c.memory.role === "hauler",
-            }).length > 0;
-          const waitTicks = this.memory.waitTicks || 0;
-          const timeout = waitTicks > 50;
+          // Just wait. Don't go to source if haulers exist but are busy.
+          this.memory.waitTicks = (this.memory.waitTicks || 0) + 1;
+          this.creep.say(`⏳ ${this.memory.waitTicks}`);
 
-          if (!haulersExist || timeout) {
-            if (timeout) this.creep.say("😤 timeout");
-
+          // Timeout fallback only if wait is EXTREME (> 150 ticks)
+          if (this.memory.waitTicks > 150) {
             const source = this.creep.pos.findClosestByPath(FIND_SOURCES);
             if (source && this.creep.harvest(source) === ERR_NOT_IN_RANGE) {
               this.move(source);
             }
-          } else {
-            // Wait for hauler (idle)
-            this.memory.waitTicks = waitTicks + 1;
-            this.creep.say(`⏳ ${this.memory.waitTicks}`);
           }
+        }
+      } else {
+        // No haulers, no containers -> Go to source
+        const source = this.creep.pos.findClosestByPath(FIND_SOURCES);
+        if (source && this.creep.harvest(source) === ERR_NOT_IN_RANGE) {
+          this.move(source);
         }
       }
     }

@@ -9,11 +9,10 @@ export class EconomyCenter {
 
     this.generateHarvestTasks(room);
     this.generateTransportTasks(room);
+    this.generateActiveDeliveryTasks(room); // [NEW]
     this.generateBuildTasks(room);
     this.generateUpgradeTasks(room);
   }
-
-  // ... (generateHarvestTasks and generateTransportTasks remain unchanged) ...
 
   private static generateHarvestTasks(room: Room) {
     const sources = room.find(FIND_SOURCES);
@@ -53,9 +52,12 @@ export class EconomyCenter {
       const fillRate = 10; // Assume 10/tick from a 5-WORK miner
       const ticksToFull = (capacity - energy) / fillRate;
 
+      // [Optimization] Dynamic Priority based on Energy Amount
       let priority = TaskPriority.LOW;
-      if (energy > 1500) priority = TaskPriority.HIGH;
-      else if (energy > 800) priority = TaskPriority.NORMAL;
+      if (energy > 1500)
+        priority = TaskPriority.HIGH; // Almost full -> Urgent
+      else if (energy > 1000) priority = TaskPriority.NORMAL; // Good amount
+      // < 1000 remains LOW
 
       // Early dispatch if filling up fast
       if (ticksToFull < 50 && energy > 500) {
@@ -71,7 +73,7 @@ export class EconomyCenter {
         priority: priority,
         targetId: container.id,
         pos: container.pos,
-        maxCreeps: energy > 1500 ? 2 : 1,
+        maxCreeps: energy > 1500 ? 3 : 1, // Allow more haulers for rich containers
         creepsAssigned: [],
         requirements: {
           bodyParts: [CARRY],
@@ -80,11 +82,11 @@ export class EconomyCenter {
         validRoles: ["hauler"],
         estimatedDuration: 50,
         creationTime: Game.time,
-        data: { resource: RESOURCE_ENERGY },
+        data: { resource: RESOURCE_ENERGY, amount: energy }, // [NEW] Pass amount for sorting
       });
     });
 
-    // 2. Dropped Resources
+    // ... (Dropped Resources logic) ...
     const dropped = room.find(FIND_DROPPED_RESOURCES, {
       filter: (r) => r.resourceType === RESOURCE_ENERGY && r.amount > 100,
     });
@@ -102,6 +104,58 @@ export class EconomyCenter {
         requirements: {
           bodyParts: [CARRY],
         },
+        creationTime: Game.time,
+        data: { resource: RESOURCE_ENERGY, amount: res.amount },
+      });
+    });
+  }
+
+  // [NEW] Active Delivery Logic
+  // Generate tasks for Haulers to deliver energy to Upgraders/Builders
+  private static generateActiveDeliveryTasks(room: Room) {
+    // Only run if we have surplus energy (avoid starving Spawn)
+    if (room.energyAvailable < room.energyCapacityAvailable * 0.5) return;
+
+    // Find hungry workers
+    const workers = room.find(FIND_MY_CREEPS, {
+      filter: (c) =>
+        (c.memory.role === "upgrader" || c.memory.role === "builder") &&
+        c.store.getFreeCapacity(RESOURCE_ENERGY) > 0 &&
+        c.memory.working, // Only feed if they are actively working (not moving to source)
+    });
+
+    workers.forEach((worker) => {
+      // Check if worker is low on energy
+      const energyRatio =
+        worker.store.getUsedCapacity(RESOURCE_ENERGY) /
+        worker.store.getCapacity(RESOURCE_ENERGY);
+      if (energyRatio > 0.5) return; // Still has enough
+
+      const taskId = `DELIVER_${worker.id}`;
+
+      // Priority logic
+      // Upgrader near downgrade: CRITICAL
+      // Builder on critical structure: HIGH
+      let priority = TaskPriority.NORMAL;
+      if (
+        worker.memory.role === "upgrader" &&
+        room.controller.ticksToDowngrade < 4000
+      )
+        priority = TaskPriority.HIGH;
+
+      GlobalDispatch.registerTask({
+        id: taskId,
+        type: "TRANSFER", // Hauler transfers TO worker
+        priority: priority,
+        targetId: worker.id,
+        pos: worker.pos,
+        maxCreeps: 1,
+        creepsAssigned: [],
+        requirements: {
+          bodyParts: [CARRY],
+        },
+        validRoles: ["hauler"],
+        estimatedDuration: 20,
         creationTime: Game.time,
         data: { resource: RESOURCE_ENERGY },
       });
