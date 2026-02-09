@@ -135,6 +135,12 @@ export class EconomyCenter {
       (room.storage && storedEnergy < 50000) ||
       (!room.storage && storedEnergy < 2000);
 
+    // [NEW] Road Construction Threshold
+    // Only build roads if we have significant surplus (e.g. > 80% full containers or Storage)
+    const canBuildRoads =
+      (room.storage && storedEnergy > 50000) ||
+      (!room.storage && storedEnergy > 3000);
+
     sites.forEach((site) => {
       // Skip non-critical construction in critical energy mode
       if (isCriticalEnergy) {
@@ -146,6 +152,11 @@ export class EconomyCenter {
         ) {
           return;
         }
+      }
+
+      // Skip roads if not rich enough
+      if (site.structureType === STRUCTURE_ROAD && !canBuildRoads) {
+        return;
       }
 
       const taskId = `BUILD_${site.id}`;
