@@ -194,29 +194,44 @@ export class EconomyCenter {
   // Generate tasks for Haulers to deliver energy to Upgraders/Builders
   private static generateActiveDeliveryTasks(room: Room) {
     // Only run if we have surplus energy (avoid starving Spawn)
-    if (room.energyAvailable < room.energyCapacityAvailable * 0.5) return;
+    // [FIX] Relax constraints. If room has decent energy (300+), active delivery is fine.
+    // Especially if workers are asking for it.
+    // If we are in CRITICAL, we might still want to deliver to Builder if it's fixing critical structure.
+    if (
+      room.energyAvailable < 300 &&
+      room.energyAvailable < room.energyCapacityAvailable * 0.5
+    )
+      return;
 
     // Find hungry workers
     const workers = room.find(FIND_MY_CREEPS, {
       filter: (c) =>
         (c.memory.role === "upgrader" || c.memory.role === "builder") &&
         c.store.getFreeCapacity(RESOURCE_ENERGY) > 0 &&
-        c.memory.working, // Only feed if they are actively working (not moving to source)
+        (c.memory.working || c.memory.requestingEnergy), // Feed if working OR requesting
     });
 
     workers.forEach((worker) => {
       // Check if worker is low on energy
+      // [FIX] If requestingEnergy flag is set, ALWAYS deliver regardless of ratio
+      // Otherwise use ratio.
+      const isRequesting = worker.memory.requestingEnergy;
       const energyRatio =
         worker.store.getUsedCapacity(RESOURCE_ENERGY) /
         worker.store.getCapacity(RESOURCE_ENERGY);
-      if (energyRatio > 0.5) return; // Still has enough
+
+      if (!isRequesting && energyRatio > 0.5) return; // Still has enough
 
       const taskId = `DELIVER_${worker.id}`;
 
       // Priority logic
       // Upgrader near downgrade: CRITICAL
       // Builder on critical structure: HIGH
+      // Requesting Energy: HIGH (User interaction)
       let priority = TaskPriority.NORMAL;
+
+      if (isRequesting) priority = TaskPriority.HIGH;
+
       if (
         worker.memory.role === "upgrader" &&
         room.controller.ticksToDowngrade < 4000

@@ -94,17 +94,33 @@ const populationModule = {
     const crisisThreshold =
       room.controller && room.controller.level >= 4 ? 5000 : 2000;
 
+    // [FIX] Post-Spawn Crisis Prevention
+    // If we just spawned something big, available energy drops to 0.
+    // But if we have valid creep population, we shouldn't panic.
+    const harvesters = Cache.getCreepsByRole(room, "harvester");
+    const haulers = Cache.getCreepsByRole(room, "hauler");
+    const healthyPopulation = harvesters.length > 0 && haulers.length > 0;
+
     if (totalEnergy < crisisThreshold && capacity >= 550) {
-      // RCL 2+
-      room.memory.energyLevel = "CRITICAL";
-      return;
+      // Only enter CRITICAL if population is also critical
+      // If we have miners and haulers, we are just "Low", not "Critical"
+      if (!healthyPopulation) {
+        room.memory.energyLevel = "CRITICAL";
+        return;
+      } else {
+        // If total energy is low but we have workers, force LOW instead of CRITICAL
+        // to allow builders to work (if logic permits)
+        room.memory.energyLevel = "LOW";
+        // Do not return, let hysteresis logic run, but ensure it doesn't go below LOW
+      }
     }
 
     let newLevel = currentLevel;
 
     // Hysteresis Buffers: +/- 0.05
     if (currentLevel === "CRITICAL") {
-      if (available >= 300) newLevel = "LOW";
+      // Exit critical if we have basic energy OR healthy population
+      if (available >= 300 || healthyPopulation) newLevel = "LOW";
     } else if (currentLevel === "LOW") {
       if (percentage > this.config.thresholds.low + 0.05) newLevel = "MEDIUM";
     } else if (currentLevel === "MEDIUM") {

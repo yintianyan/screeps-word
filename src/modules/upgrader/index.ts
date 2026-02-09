@@ -152,8 +152,8 @@ export default class Upgrader extends Role {
           this.memory.waitTicks = (this.memory.waitTicks || 0) + 1;
           this.creep.say(`⏳ ${this.memory.waitTicks}`);
 
-          // Timeout fallback only if wait is EXTREME (> 150 ticks)
-          if (this.memory.waitTicks > 150) {
+          // Timeout fallback only if wait is EXTREME (> 300 ticks)
+          if (this.memory.waitTicks > 300) {
             const source = this.creep.pos.findClosestByPath(FIND_SOURCES);
             if (source && this.creep.harvest(source) === ERR_NOT_IN_RANGE) {
               this.move(source);

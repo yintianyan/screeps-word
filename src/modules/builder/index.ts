@@ -30,6 +30,10 @@ export default class Builder extends Role {
     const energyLevel = this.creep.room.memory.energyLevel;
     const isCrisis = energyLevel === "CRITICAL";
 
+    // [FIX] Even in Crisis, if I have energy, I should work!
+    // And if I am empty, I should try to help recovery if possible (e.g. harvest?)
+    // But blocking the loop entirely is bad.
+
     // Check if we are building something critical
     let isCriticalTask = false;
     if (this.memory.working) {
@@ -74,13 +78,14 @@ export default class Builder extends Role {
 
     if (isCrisis && !isCriticalTask) {
       // Sleep logic
-      this.creep.say("💤 crisis");
-      // Park off road to avoid blocking traffic
-      // (Assuming moveModule is available via global or import, but Role base class has move wrapper)
-      // Here we just use a simple random move if on road, or stay still.
-      // Ideally use moveModule.parkOffRoad(this.creep);
-      // But for now, just don't do anything consuming.
-      return;
+      // [FIX] If I have energy, work anyway to help clear crisis (maybe upgrade or repair)
+      if (this.creep.store[RESOURCE_ENERGY] > 0) {
+        // Continue execution
+      } else {
+        this.creep.say("💤 crisis");
+        // Park off road to avoid blocking traffic
+        return;
+      }
     }
 
     if (this.memory.working) {
@@ -249,8 +254,12 @@ export default class Builder extends Role {
           this.memory.waitTicks = (this.memory.waitTicks || 0) + 1;
           this.creep.say(`⏳ ${this.memory.waitTicks}`);
 
-          // Timeout fallback only if wait is EXTREME (> 150 ticks)
-          if (this.memory.waitTicks > 150) {
+          // [FIX] Increase timeout significantly.
+          // If haulers exist, we should almost NEVER harvest unless it's been ages (e.g. 300 ticks)
+          // Or if room energy is Critical.
+          const timeoutLimit = energyLevel === "CRITICAL" ? 50 : 300;
+
+          if (this.memory.waitTicks > timeoutLimit) {
             const source = this.creep.pos.findClosestByPath(FIND_SOURCES);
             if (source && this.creep.harvest(source) === ERR_NOT_IN_RANGE) {
               this.move(source);
