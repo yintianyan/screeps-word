@@ -1,8 +1,11 @@
-
-import { DispatchMemory, Task, TaskPriority, TaskType } from "../types/dispatch";
+import {
+  DispatchMemory,
+  Task,
+  TaskPriority,
+  TaskType,
+} from "../types/dispatch";
 
 export class GlobalDispatch {
-  
   static init() {
     if (!Memory.dispatch) {
       Memory.dispatch = {
@@ -13,15 +16,15 @@ export class GlobalDispatch {
           [TaskPriority.HIGH]: [],
           [TaskPriority.NORMAL]: [],
           [TaskPriority.LOW]: [],
-          [TaskPriority.IDLE]: []
-        }
+          [TaskPriority.IDLE]: [],
+        },
       };
     }
   }
 
   static run(room: Room) {
     this.init();
-    
+
     // 1. Cleanup invalid tasks/assignments
     this.cleanup();
 
@@ -52,7 +55,7 @@ export class GlobalDispatch {
     if (Memory.dispatch.assignments[creepId] === taskId) {
       delete Memory.dispatch.assignments[creepId];
     }
-    
+
     // Logic to remove task if fully completed?
     // For now, assume tasks are one-off or managed by Centers.
     // Ideally, Center checks if task is done.
@@ -71,8 +74,9 @@ export class GlobalDispatch {
 
   private static dispatch(room: Room) {
     // Find idle creeps in this room
+    // [Optimization] Only dispatch to idle creeps OR creeps with low priority tasks if CRITICAL task exists
     const idleCreeps = room.find(FIND_MY_CREEPS, {
-      filter: (c) => !Memory.dispatch.assignments[c.id] && !c.spawning
+      filter: (c) => !Memory.dispatch.assignments[c.id] && !c.spawning,
     });
 
     if (idleCreeps.length === 0) return;
@@ -83,7 +87,7 @@ export class GlobalDispatch {
       TaskPriority.HIGH,
       TaskPriority.NORMAL,
       TaskPriority.LOW,
-      TaskPriority.IDLE
+      TaskPriority.IDLE,
     ];
 
     for (const priority of priorities) {
@@ -91,11 +95,11 @@ export class GlobalDispatch {
       if (queue.length === 0) continue;
 
       // Try to assign tasks in this queue
-      // Simple FIFO for now, optimize with "Best Match" later
       for (let i = 0; i < queue.length; i++) {
         const taskId = queue[i];
         const task = Memory.dispatch.tasks[taskId];
-        
+
+        // Cleanup invalid tasks
         if (!task) {
           queue.splice(i, 1);
           i--;
@@ -111,11 +115,11 @@ export class GlobalDispatch {
           // Assign
           Memory.dispatch.assignments[bestCreep.id] = task.id;
           task.creepsAssigned.push(bestCreep.id);
-          
+
           // Remove from idle list
           const index = idleCreeps.indexOf(bestCreep);
           idleCreeps.splice(index, 1);
-          
+
           if (idleCreeps.length === 0) return;
         }
       }
@@ -124,25 +128,48 @@ export class GlobalDispatch {
 
   private static findBestCreep(creeps: Creep[], task: Task): Creep | null {
     // Filter by capability
-    const candidates = creeps.filter(c => {
+    const candidates = creeps.filter((c) => {
+      // 0. Check Role Preference
+      if (task.validRoles && task.validRoles.length > 0) {
+        if (!task.validRoles.includes(c.memory.role)) return false;
+      }
+
       // 1. Check Body Requirements
       if (task.requirements?.bodyParts) {
-        const hasParts = task.requirements.bodyParts.every(part => c.getActiveBodyparts(part) > 0);
+        const hasParts = task.requirements.bodyParts.every(
+          (part) => c.getActiveBodyparts(part) > 0,
+        );
         if (!hasParts) return false;
       }
+
       // 2. Check Capacity
       if (task.requirements?.minCapacity) {
         if (c.store.getCapacity() < task.requirements.minCapacity) return false;
       }
+
+      // 3. Check Lifespan (Predictive)
+      if (task.estimatedDuration && c.ticksToLive) {
+        // Need at least enough life to reach target + do task
+        const range = c.pos.getRangeTo(task.pos);
+        if (c.ticksToLive < range + task.estimatedDuration) return false;
+      }
+
       return true;
     });
 
     if (candidates.length === 0) return null;
 
-    // Sort by distance (simple optimization)
-    // In a real system, we'd cache paths or use Manhattan distance
-    return task.pos ? candidates.sort((a, b) => 
-      a.pos.getRangeTo(task.pos) - b.pos.getRangeTo(task.pos)
-    )[0] : candidates[0];
+    // Sort by Score (Distance + Role Match)
+    return candidates.sort((a, b) => {
+      // Prefer closer creeps
+      const distA = a.pos.getRangeTo(task.pos);
+      const distB = b.pos.getRangeTo(task.pos);
+
+      // Prefer role match
+      const roleMatchA = task.validRoles?.includes(a.memory.role) ? -10 : 0;
+      const roleMatchB = task.validRoles?.includes(b.memory.role) ? -10 : 0;
+
+      return distA + roleMatchA - (distB + roleMatchB);
+    })[0];
   }
 }

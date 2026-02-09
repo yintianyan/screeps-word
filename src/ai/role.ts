@@ -52,7 +52,7 @@ export default class Role {
    */
   runTask(task: Task) {
     const target = Game.getObjectById(task.targetId) as any;
-    
+
     // Validation
     if (!target && !task.pos) {
       console.log(`[Role] Task ${task.id} invalid target`);
@@ -63,65 +63,121 @@ export default class Role {
     const pos = target ? target.pos : task.pos;
 
     // Movement
-    if (!this.creep.pos.inRangeTo(pos, task.type === 'HARVEST' || task.type === 'ATTACK' ? 1 : 3)) {
-        this.move(pos);
-        // Continue to try action if in range (e.g. range 3 for build/repair/upgrade)
+    if (
+      !this.creep.pos.inRangeTo(
+        pos,
+        task.type === "HARVEST" || task.type === "ATTACK" ? 1 : 3,
+      )
+    ) {
+      this.move(pos);
+      // Continue to try action if in range (e.g. range 3 for build/repair/upgrade)
     }
 
     // Action Execution
     let result: number = OK;
     switch (task.type) {
-        case 'HARVEST':
-            if (target instanceof Source || target instanceof Mineral) {
-                result = this.creep.harvest(target as Source);
-            }
-            break;
-        case 'TRANSFER':
-            if (target instanceof Structure || target instanceof Creep) {
-                result = this.creep.transfer(target as AnyCreep | Structure, task.data?.resource || RESOURCE_ENERGY);
-            }
-            break;
-        case 'PICKUP':
-            if (target instanceof Resource) {
-                result = this.creep.pickup(target);
-            } else if (target instanceof Structure) { // Withdraw from container
-                 result = this.creep.withdraw(target as Structure, task.data?.resource || RESOURCE_ENERGY);
-            }
-            break;
-        case 'BUILD':
-            if (target instanceof ConstructionSite) {
-                result = this.creep.build(target);
-            }
-            break;
-        case 'REPAIR':
-            if (target instanceof Structure) {
-                result = this.creep.repair(target);
-            }
-            break;
-        case 'UPGRADE':
-            if (target instanceof StructureController) {
-                result = this.creep.upgradeController(target);
-            }
-            break;
-        case 'ATTACK':
-            if (target instanceof Creep || target instanceof Structure) {
-                result = this.creep.attack(target as AnyCreep | Structure);
-            }
-            break;
-        case 'HEAL':
-            if (target instanceof Creep) {
-                result = this.creep.heal(target);
-            }
-            break;
+      case "HARVEST":
+        if (target instanceof Source || target instanceof Mineral) {
+          result = this.creep.harvest(target as Source);
+          // Sticky Task: Do not complete even if full (handled by link/container)
+          // Only if no capacity and no link nearby?
+          // For now, let Harvester be simple.
+        }
+        break;
+      case "TRANSFER":
+        if (target instanceof Structure || target instanceof Creep) {
+          result = this.creep.transfer(
+            target as AnyCreep | Structure,
+            task.data?.resource || RESOURCE_ENERGY,
+          );
+        }
+        if (result === OK || result === ERR_FULL) {
+          // Job done if empty or target full
+          const targetStruct = target as AnyStoreStructure;
+          if (
+            this.creep.store.getUsedCapacity() === 0 ||
+            (targetStruct.store &&
+              targetStruct.store.getFreeCapacity(
+                task.data?.resource || RESOURCE_ENERGY,
+              ) === 0)
+          ) {
+            GlobalDispatch.completeTask(task.id, this.creep.id);
+          }
+        }
+        break;
+      case "PICKUP":
+        if (target instanceof Resource) {
+          result = this.creep.pickup(target);
+        } else if (target instanceof Structure) {
+          // Withdraw from container
+          result = this.creep.withdraw(
+            target as Structure,
+            task.data?.resource || RESOURCE_ENERGY,
+          );
+        }
+        // Check if done
+        if (result === OK || result === ERR_FULL) {
+          if (this.creep.store.getFreeCapacity() === 0) {
+            GlobalDispatch.completeTask(task.id, this.creep.id);
+            // [PREDICTIVE] Auto-assign a TRANSFER task?
+            // Ideally Dispatch should see an idle full creep and assign transfer.
+          }
+        }
+        break;
+      case "BUILD":
+        if (target instanceof ConstructionSite) {
+          result = this.creep.build(target);
+        }
+        if (this.creep.store.getUsedCapacity() === 0) {
+          // Keep task but need refill.
+          // For now, simple logic: drop task to refill
+          GlobalDispatch.completeTask(task.id, this.creep.id);
+        }
+        break;
+      case "REPAIR":
+        if (target instanceof Structure) {
+          result = this.creep.repair(target);
+        }
+        if (
+          this.creep.store.getUsedCapacity() === 0 ||
+          (target as Structure).hits === (target as Structure).hitsMax
+        ) {
+          GlobalDispatch.completeTask(task.id, this.creep.id);
+        }
+        break;
+      case "UPGRADE":
+        if (target instanceof StructureController) {
+          result = this.creep.upgradeController(target);
+        }
+        if (this.creep.store.getUsedCapacity() === 0) {
+          // For upgrader, we might want to keep task and just say "Needs Energy"
+          // But for dispatch simplicity, drop task -> Refill -> Reassign Upgrade
+          GlobalDispatch.completeTask(task.id, this.creep.id);
+        }
+        break;
+      case "ATTACK":
+        if (target instanceof Creep || target instanceof Structure) {
+          result = this.creep.attack(target as AnyCreep | Structure);
+        }
+        break;
+      case "HEAL":
+        if (target instanceof Creep) {
+          result = this.creep.heal(target);
+        }
+        break;
     }
 
     if (result === ERR_NOT_IN_RANGE) {
-        this.move(pos);
+      this.move(pos);
     } else if (result !== OK && result !== ERR_TIRED) {
-        // Log error or finish task if done
-        if (result === ERR_FULL || result === ERR_NOT_ENOUGH_RESOURCES || result === ERR_INVALID_TARGET) {
-             GlobalDispatch.completeTask(task.id, this.creep.id);
-        }
+      // Log error or finish task if done
+      if (
+        result === ERR_FULL ||
+        result === ERR_NOT_ENOUGH_RESOURCES ||
+        result === ERR_INVALID_TARGET
+      ) {
+        GlobalDispatch.completeTask(task.id, this.creep.id);
+      }
     }
   }
 
