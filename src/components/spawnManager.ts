@@ -51,15 +51,24 @@ const spawnerModule = {
           );
         }
       } else {
-        console.log(`[Spawner] ❌ 孵化失败: ${result}`);
         // 失败处理？
         // 应该把任务放回队列？或者如果是 ERR_NOT_ENOUGH_ENERGY，可以等待。
         // 暂时 GlobalDispatch 的 getNextSpawnTask 已经移除了任务。
         // 如果失败了，我们需要重新注册回去。
         if (result === ERR_NOT_ENOUGH_ENERGY) {
+          // [Visualization] Show waiting status
+          spawn.room.visual.text(
+            "⏳ Waiting for energy",
+            spawn.pos.x + 1,
+            spawn.pos.y,
+            { align: "left", opacity: 0.8, color: "#ffff00" },
+          );
+
           // 放回队列头部?
           // 暂时简单重新注册
           GlobalDispatch.registerSpawnTask(task);
+        } else {
+          console.log(`[Spawner] ❌ 孵化失败: ${result}`);
         }
       }
     }

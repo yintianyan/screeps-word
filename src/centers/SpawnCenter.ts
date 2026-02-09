@@ -40,20 +40,20 @@ export class SpawnCenter {
     for (const name in requests) {
       const req = requests[name];
       // 仅处理本房间的请求
-      // 注意：Lifecycle 里的 requests key 是 creepName
-      // 我们需要确认这个 creep 是属于本房间的
-      // 但 creep 可能已经死了。所以我们需要在 request 里存 roomName?
-      // 目前 Lifecycle 没存，但我们可以通过 Game.creeps[name]?.room.name 判断
-      // 或者假设 Memory.creeps[name].room 存在
-
-      // 简化：如果 Creep 还活着，检查房间。如果死了，检查 Memory。
+      // ... (省略部分注释)
       let requestRoom = Game.creeps[name]?.room.name;
       if (!requestRoom && Memory.creeps[name])
         requestRoom = Memory.creeps[name].room;
 
       if (requestRoom === room.name) {
+        // [Greedy Logic]
+        // 检查房间状态：如果是 CRITICAL (能源危机)，则使用当前能量 (false)
+        // 否则使用最大容量 (true) 来尝试孵化最好的 Creep
+        const energyLevel = populationModule.getEnergyLevel(room);
+        const forceMax = energyLevel !== "CRITICAL";
+
         // 转换为 SpawnTask
-        const body = populationModule.getBody(room, req.role);
+        const body = populationModule.getBody(room, req.role, forceMax);
         const newName =
           req.role.charAt(0).toUpperCase() + req.role.slice(1) + Game.time;
 
@@ -76,13 +76,16 @@ export class SpawnCenter {
           requestTime: Game.time,
         };
 
-        console.log(`[SpawnCenter] 🚨 批准生命周期替换: ${name} -> ${newName}`);
+        const cost = populationModule.calculateBodyCost(body);
+        const waitStatus =
+          forceMax && room.energyAvailable < cost ? " (Waiting for fill)" : "";
+        console.log(
+          `[SpawnCenter] 🚨 批准生命周期替换: ${name} -> ${newName} [Cost: ${cost}]${waitStatus}`,
+        );
+
         GlobalDispatch.registerSpawnTask(task);
 
         // 通知 Lifecycle 请求已被接管 (避免重复处理)
-        // 但 Lifecycle 的 notifySpawn 是在孵化成功后调用的
-        // 这里我们先不动 requests，等 spawnManager 执行成功后再清理
-        // 或者：我们可以现在就删掉 request，因为已经在 SpawnQueue 里了
         delete requests[name]; // 移除 Lifecycle 请求，防止重复
         return; // 一次只处理一个
       }
@@ -96,11 +99,6 @@ export class SpawnCenter {
     const creeps = room.find(FIND_MY_CREEPS);
 
     creeps.forEach((c) => {
-      // 排除掉正在濒死且已经申请替换的 Creep?
-      // 不，Lifecycle 已经处理了替换。这里只看绝对数量缺口。
-      // 如果一个 Creep 濒死，它还在 currentCounts 里。
-      // 如果它申请了替换，SpawnQueue 里会有任务，hasPendingTask 会拦截。
-      // 所以这里只处理：还没死，也没申请替换，但数量就是不够的情况（比如意外死亡）。
       const role = c.memory.role;
       currentCounts[role] = (currentCounts[role] || 0) + 1;
     });
@@ -128,7 +126,19 @@ export class SpawnCenter {
           if (bestSourceId) memory.sourceId = bestSourceId;
         }
 
-        const body = populationModule.getBody(room, role);
+        // [Greedy Logic]
+        // 如果是补充人口，特别是 Hauler/Upgrader，我们希望质量高一点
+        // 只有 Harvester 在数量为 0 时需要急救 (false)
+        // 其他情况尽量贪婪 (true)
+        const energyLevel = populationModule.getEnergyLevel(room);
+        let forceMax = energyLevel !== "CRITICAL";
+
+        // 如果 Harvester 挂光了，必须立即孵化，不能等
+        if (role === "harvester" && current === 0) forceMax = false;
+        // 如果 Hauler 挂光了，也不能等
+        if (role === "hauler" && current === 0) forceMax = false;
+
+        const body = populationModule.getBody(room, role, forceMax);
         const newName =
           role.charAt(0).toUpperCase() + role.slice(1) + Game.time;
 
@@ -142,6 +152,13 @@ export class SpawnCenter {
           memory: memory,
           requestTime: Game.time,
         };
+
+        const cost = populationModule.calculateBodyCost(body);
+        const waitStatus =
+          forceMax && room.energyAvailable < cost ? " (Waiting for fill)" : "";
+        console.log(
+          `[SpawnCenter] 🆕 批准人口补充: ${role} [Cost: ${cost}]${waitStatus}`,
+        );
 
         GlobalDispatch.registerSpawnTask(task);
         return; // 一次一个

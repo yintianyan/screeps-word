@@ -422,17 +422,31 @@ const populationModule = {
 
   /**
    * 生成 Body (新版：基于能量等级)
+   * @param {Room} room
+   * @param {string} role
+   * @param {boolean} forceMax - 是否强制使用最大容量计算 (Greedy Spawning)
    */
-  getBody: function (room: Room, role: string): BodyPartConstant[] {
+  getBody: function (
+    room: Room,
+    role: string,
+    forceMax: boolean = false,
+  ): BodyPartConstant[] {
     const level = this.getEnergyLevel(room);
-    const availableEnergy = room.energyAvailable;
     const capacity = room.energyCapacityAvailable;
+    // 如果 forceMax 为 true 且不是 CRITICAL 状态，则使用容量计算，否则使用当前能量
+    const availableEnergy =
+      forceMax && level !== "CRITICAL" ? capacity : room.energyAvailable;
 
     // Analyze Task Loads (Cached)
     const tasks = TaskManager.analyze(room);
 
     // Determine max parts based on level
-    let maxParts = this.config.partLimits[level] || 50;
+    // [Optimization] If forcing max, treat as HIGH potential
+    let maxParts =
+      forceMax && level !== "CRITICAL"
+        ? this.config.partLimits["HIGH"]
+        : this.config.partLimits[level] || 50;
+
     if (level === "CRITICAL") maxParts = 3;
 
     // --- Dynamic Body Constraints based on Tasks ---
