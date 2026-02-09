@@ -15,6 +15,7 @@ export class GlobalDispatch {
         queues: {
           [TaskPriority.CRITICAL]: [],
           [TaskPriority.HIGH]: [],
+          [TaskPriority.MEDIUM]: [], // [NEW] Added MEDIUM
           [TaskPriority.NORMAL]: [],
           [TaskPriority.LOW]: [],
           [TaskPriority.IDLE]: [],
@@ -116,6 +117,7 @@ export class GlobalDispatch {
     const priorities = [
       TaskPriority.CRITICAL,
       TaskPriority.HIGH,
+      TaskPriority.MEDIUM, // [NEW] Added MEDIUM
       TaskPriority.NORMAL,
       TaskPriority.LOW,
       TaskPriority.IDLE,

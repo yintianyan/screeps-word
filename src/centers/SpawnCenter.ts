@@ -15,20 +15,50 @@ export class SpawnCenter {
   static run(room: Room) {
     if (Game.time % 5 !== 0) return; // 每 5 ticks 运行一次，节省 CPU
 
+    // [Rule 4] Maintain Priority Queue Logic (In Memory)
+    if (!room.memory.spawnQueue) room.memory.spawnQueue = [];
+
     // 1. 检查是否存在积压的孵化任务
-    // 如果队列里已经有本房间的任务，先别生成新的，防止重复
-    if (this.hasPendingTask(room.name)) return;
+    // [FIX] Anti-Duplication: If queue has pending task for this room, do not generate new ones blindly.
+    // However, we might have multiple tasks for DIFFERENT roles.
+    // So we should check if we can process gap for a role that is NOT in queue.
+    // For simplicity, let's keep single-threaded for now but refine the check.
+    // if (this.hasPendingTask(room.name)) return; // <-- REMOVED strict blocking
 
     // 2. 处理生命周期替换 (Lifecycle) - 最高优先级
-    // Lifecycle 模块已经把请求放到了 Memory.lifecycle.requests
-    // 我们负责搬运这些请求到 GlobalDispatch
     this.processLifecycleRequests(room);
 
     // 3. 处理常规人口缺口 (Population Gap)
-    // 只有在没有处理 Lifecycle 请求时才进行（单线程产出）
-    if (!this.hasPendingTask(room.name)) {
-      this.processPopulationGaps(room);
+    this.processPopulationGaps(room);
+  }
+
+  // [Rule 2] Redundancy Check Helper
+  private static isRoleRedundant(room: Room, role: string): boolean {
+    if (role === "harvester") {
+      // Check Room.memory.harvesters
+      if (room.memory.harvesters) {
+        const totalWork = room.memory.harvesters.reduce(
+          (sum: number, h: any) => sum + h.workParts,
+          0,
+        );
+        const sources = room.find(FIND_SOURCES).length;
+        if (totalWork >= sources * 3) return true; // Lock if saturated
+      }
     }
+    return false;
+  }
+
+  // Helper to check if a specific role is already queued
+  private static isRoleQueued(roomName: string, role: string): boolean {
+    const globalQueue = Memory.dispatch.spawnQueue || [];
+    const localQueue = Memory.rooms[roomName].spawnQueue || [];
+
+    const inGlobal = globalQueue.some(
+      (t) => t.roomName === roomName && t.role === role,
+    );
+    const inLocal = localQueue.some((t: any) => t.role === role);
+
+    return inGlobal || inLocal;
   }
 
   private static hasPendingTask(roomName: string): boolean {
@@ -94,7 +124,28 @@ export class SpawnCenter {
 
   private static processPopulationGaps(room: Room) {
     // 获取目标和现状
+    // [Rule 3] Dynamic Load Balancing
+    // Recalculate targets based on detailed formula
+    // Harvester = ceil(Source*2 + Reserve/1000)
+    // If Reserve > 8000 -> 1.2 * Source
+    const sources = room.find(FIND_SOURCES).length;
+    const totalEnergy = room.memory.totalEnergy || 0;
+
+    // Override PopulationManager's logic partially or trust it?
+    // Let's implement the formula here to override 'harvester' target
+    let harvesterTarget = 0;
+    if (totalEnergy > 8000) {
+      harvesterTarget = Math.ceil(sources * 1.2);
+    } else {
+      harvesterTarget = Math.ceil(sources * 2 + totalEnergy / 1000);
+    }
+    // Cap at reasonable limit (e.g. 6) to avoid infinite growth
+    harvesterTarget = Math.min(harvesterTarget, 6);
+
     const targets = populationModule.calculateTargets(room);
+    // Apply override
+    targets.harvester = harvesterTarget;
+
     const currentCounts = {};
     const creeps = room.find(FIND_MY_CREEPS);
 
@@ -104,6 +155,11 @@ export class SpawnCenter {
     });
 
     // 优先级顺序
+    // [Rule 4] Priority Queue Mapping
+    // CRITICAL: Defense (not handled here usually), Emergency
+    // HIGH: Upgrader (Energy < 300)
+    // MEDIUM: Harvester
+    // LOW: Builder
     const rolePriority = ["harvester", "hauler", "upgrader", "builder"];
 
     for (const role of rolePriority) {
@@ -111,6 +167,20 @@ export class SpawnCenter {
       const current = currentCounts[role] || 0;
 
       if (current < target) {
+        // [Rule 2] Redundancy Check
+        if (this.isRoleRedundant(room, role)) {
+          console.log(
+            `[SpawnCenter] 🔒 通道锁定: ${role} 已饱和 (Redundancy Check)`,
+          );
+          continue;
+        }
+
+        // [Fix] Anti-Duplication Check
+        if (this.isRoleQueued(room.name, role)) {
+          // console.log(`[SpawnCenter] ⏳ 等待队列: ${role} 已在队列中`);
+          continue;
+        }
+
         // 发现缺口！
         console.log(
           `[SpawnCenter] 📉 发现人口缺口: ${role} (${current}/${target})`,
@@ -139,15 +209,31 @@ export class SpawnCenter {
         if (role === "hauler" && current === 0) forceMax = false;
 
         const body = populationModule.getBody(room, role, forceMax);
+
+        // [Rule 1.3] If body is null (banned), abort
+        if (!body) {
+          console.log(
+            `[SpawnCenter] ⛔ 孵化拒绝: ${role} (Body Check Failed - Low Energy)`,
+          );
+          continue;
+        }
+
         const newName =
           role.charAt(0).toUpperCase() + role.slice(1) + Game.time;
+
+        // [Rule 4] Priority Assignment
+        let priority = TaskPriority.NORMAL;
+        if (role === "harvester") priority = TaskPriority.MEDIUM; // As per rule 4 mapping
+        if (role === "upgrader" && room.energyAvailable < 300)
+          priority = TaskPriority.HIGH;
+        if (role === "builder") priority = TaskPriority.LOW;
+        if (current === 0) priority = TaskPriority.CRITICAL; // Survival overrides all
 
         const task: SpawnTask = {
           id: `SPAWN_${newName}`,
           roomName: room.name,
           role: role,
-          priority:
-            role === "harvester" ? TaskPriority.CRITICAL : TaskPriority.NORMAL,
+          priority: priority,
           body: body,
           memory: memory,
           requestTime: Game.time,

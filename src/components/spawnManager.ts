@@ -28,6 +28,19 @@ const spawnerModule = {
     const task = GlobalDispatch.getNextSpawnTask(room.name);
 
     if (task) {
+      // [Rule 6] Pre-Spawn Validation Hook
+      if (this.validateSpawnRequest(spawn, task) !== OK) {
+        // Validation failed, log error and drop task
+        console.log(`[Spawner] ⛔ 任务被拦截: ${task.role} 不符合孵化标准`);
+        if (!room.memory.spawnErrors) room.memory.spawnErrors = [];
+        room.memory.spawnErrors.push({
+          time: Game.time,
+          role: task.role,
+          reason: "Validation Failed (Low parts or Duplicate)",
+        });
+        return;
+      }
+
       // 执行孵化
       const result = spawn.spawnCreep(
         task.body,
@@ -72,6 +85,41 @@ const spawnerModule = {
         }
       }
     }
+  },
+  validateSpawnRequest: function (spawn: StructureSpawn, task: any): number {
+    // 1. Check for 1-WORK Harvester when Energy is high
+    if (task.role === "harvester") {
+      const workParts = task.body.filter(
+        (p: BodyPartConstant) => p === WORK,
+      ).length;
+      if (workParts < 2 && spawn.room.energyAvailable >= 300) {
+        const harvesters = spawn.room.find(FIND_MY_CREEPS, {
+          filter: (c) => c.memory.role === "harvester",
+        });
+        if (harvesters.length > 0) {
+          return ERR_INVALID_ARGS; // Reject weakling if not emergency
+        }
+      }
+
+      // 2. Check for Duplicates (Double safety net)
+      // If room already has enough harvesters, reject.
+      // Note: This might conflict with replacement logic if not careful.
+      // Replacement task usually has 'predecessorId'.
+      if (!task.memory.predecessorId) {
+        const harvesters = spawn.room.find(FIND_MY_CREEPS, {
+          filter: (c) => c.memory.role === "harvester",
+        });
+        const sources = spawn.room.find(FIND_SOURCES).length;
+        if (harvesters.length >= sources * 2) {
+          // Hard cap 2 per source
+          // Allow if total work is low?
+          // Rely on PopulationManager's logic, but this is a final sanity check.
+          // Let's just log it but allow for now, unless extreme.
+          if (harvesters.length >= 6) return ERR_INVALID_ARGS;
+        }
+      }
+    }
+    return OK;
   },
 };
 
