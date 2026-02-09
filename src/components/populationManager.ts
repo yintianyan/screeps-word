@@ -302,16 +302,20 @@ const populationModule = {
       () => room.find(FIND_SOURCES),
       1000,
     );
+    const level = this.getEnergyLevel(room);
 
     let globalBoost = 0;
-    const upgraders = Cache.getCreepsByRole(room, "upgrader").filter((c) =>
-      Lifecycle.isOperational(c),
-    );
-    const avgIdle =
-      upgraders.reduce((sum, c) => sum + (c.memory.idleTicks || 0), 0) /
-      (upgraders.length || 1);
-    if (avgIdle > 20) {
-      globalBoost = 1;
+    // Only apply boost if not CRITICAL
+    if (level !== "CRITICAL") {
+      const upgraders = Cache.getCreepsByRole(room, "upgrader").filter((c) =>
+        Lifecycle.isOperational(c),
+      );
+      const avgIdle =
+        upgraders.reduce((sum, c) => sum + (c.memory.idleTicks || 0), 0) /
+        (upgraders.length || 1);
+      if (avgIdle > 20) {
+        globalBoost = 1;
+      }
     }
 
     const overrides =
@@ -326,27 +330,35 @@ const populationModule = {
       }
 
       let count = this.config.ratios.haulerBaseCount;
-      const allContainers = Cache.getStructures(room, STRUCTURE_CONTAINER);
-      const container = allContainers.find((c) => c.pos.inRangeTo(source, 2));
 
-      if (container) {
-        const energy = container.store[RESOURCE_ENERGY];
-        if (energy > 1500)
-          count += 2; // Aggressive hauling for high stockpile
-        else if (energy > 800) count += 1;
+      if (level !== "CRITICAL") {
+        const allContainers = Cache.getStructures(room, STRUCTURE_CONTAINER);
+        const container = allContainers.find((c) => c.pos.inRangeTo(source, 2));
+
+        if (container) {
+          const energy = container.store[RESOURCE_ENERGY];
+          if (energy > 1500)
+            count += 2; // Aggressive hauling for high stockpile
+          else if (energy > 800) count += 1;
+        }
+
+        const allDropped = Cache.getTick(`dropped_${room.name}`, () =>
+          room.find(FIND_DROPPED_RESOURCES),
+        );
+        const dropped = allDropped.filter(
+          (r) =>
+            r.resourceType === RESOURCE_ENERGY && r.pos.inRangeTo(source, 3),
+        );
+        const droppedAmount = dropped.reduce((sum, r) => sum + r.amount, 0);
+        if (droppedAmount > 500) count += 1;
+
+        count += globalBoost;
+        count = Math.min(count, 4); // Max 4 per source
+      } else {
+        // Critical Mode Cap
+        count = 1;
       }
 
-      const allDropped = Cache.getTick(`dropped_${room.name}`, () =>
-        room.find(FIND_DROPPED_RESOURCES),
-      );
-      const dropped = allDropped.filter(
-        (r) => r.resourceType === RESOURCE_ENERGY && r.pos.inRangeTo(source, 3),
-      );
-      const droppedAmount = dropped.reduce((sum, r) => sum + r.amount, 0);
-      if (droppedAmount > 500) count += 1;
-
-      count += globalBoost;
-      count = Math.min(count, 4); // Max 4 per source
       needs[source.id] = count;
     });
 

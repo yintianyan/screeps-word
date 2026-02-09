@@ -1,3 +1,5 @@
+import populationModule from "./populationManager";
+
 /**
  * 生命周期管理系统 (Lifecycle Management System)
  *
@@ -18,11 +20,11 @@ const Lifecycle = {
   /**
    * 主运行循环
    */
-  run: function () {
+  run: function (room: Room) {
     if (Game.time % this.config.checkInterval !== 0) return;
 
     this.initMemory();
-    this.monitorCreeps();
+    this.monitorCreeps(room);
     this.cleanupMemory();
   },
 
@@ -39,12 +41,24 @@ const Lifecycle = {
   /**
    * 扫描所有 Creep 以检查是否需要替换
    */
-  monitorCreeps: function () {
+  monitorCreeps: function (room: Room) {
     const registry = Memory.lifecycle.registry;
     const requests = Memory.lifecycle.requests;
 
-    for (const name in Game.creeps) {
-      const creep = Game.creeps[name];
+    // Get population targets for this room
+    const targets = populationModule.calculateTargets(room);
+
+    // Count active creeps (excluding dying ones) to determine if we need replacement
+    const currentCounts = {};
+    const roomCreeps = room.find(FIND_MY_CREEPS);
+
+    roomCreeps.forEach((c) => {
+      const role = c.memory.role;
+      currentCounts[role] = (currentCounts[role] || 0) + 1;
+    });
+
+    for (const creep of roomCreeps) {
+      const name = creep.name;
 
       // 如果已经在处理中，则跳过
       if (registry[name] === "PRE_SPAWNING") continue;
@@ -54,6 +68,21 @@ const Lifecycle = {
       const threshold = maxLife * this.config.thresholdRatio; // 150 ticks
 
       if (creep.ticksToLive < threshold) {
+        // [New] Population Cap Check
+        // If we have more creeps than target, let this one die naturally.
+        const role = creep.memory.role;
+        const targetCount = targets[role] || 0;
+        const currentCount = currentCounts[role] || 0;
+
+        if (currentCount > targetCount) {
+          console.log(
+            `[Lifecycle] 🍂 ${name} (${role}) 自然死亡 (当前 ${currentCount} > 目标 ${targetCount})`,
+          );
+          // Mark as pre-spawning so we don't check again, but DO NOT create request
+          registry[name] = "PRE_SPAWNING";
+          continue;
+        }
+
         // 触发替换
         console.log(
           `[Lifecycle] ⚠️ ${name} 濒死 (TTL: ${creep.ticksToLive}). 请求替换。`,
@@ -80,7 +109,7 @@ const Lifecycle = {
   /**
    * 根据角色确定优先级
    */
-  getPriority: function (role) {
+  getPriority: function (role: string) {
     const priorities = {
       harvester: 100,
       hauler: 90,
@@ -93,7 +122,7 @@ const Lifecycle = {
   /**
    * 当替换者成功孵化时由 Spawner 调用
    */
-  notifySpawn: function (oldCreepName, newCreepName) {
+  notifySpawn: function (oldCreepName: string, newCreepName: string) {
     if (Memory.lifecycle.requests[oldCreepName]) {
       delete Memory.lifecycle.requests[oldCreepName];
       this.logEvent(oldCreepName, "REPLACED", `替换者已孵化: ${newCreepName}`);
@@ -134,7 +163,7 @@ const Lifecycle = {
    * 如果 Creep 濒死且已请求替换，返回 FALSE
    * 这允许人口计数器为新 Creep "腾出空间"
    */
-  isOperational: function (creep) {
+  isOperational: function (creep: Creep) {
     if (!Memory.lifecycle || !Memory.lifecycle.registry) return true;
 
     // 如果标记为 PRE_SPAWNING，它实际上不再计入，
@@ -154,7 +183,7 @@ const Lifecycle = {
 
   // === API & 日志 ===
 
-  logEvent: function (creepName, type, message) {
+  logEvent: function (creepName: string, type: string, message: string) {
     const entry = {
       time: Game.time,
       creep: creepName,
