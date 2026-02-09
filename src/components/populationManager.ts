@@ -1,4 +1,3 @@
-
 import Cache from "./memoryManager";
 import Lifecycle from "./roomManager";
 import TaskManager from "./taskManager";
@@ -59,26 +58,41 @@ const populationModule = {
 
     // Critical check (Override based on Total Energy)
     // Calculate Total Usable Energy (Spawn + Ext + Storage + Containers + Dropped)
-    const containers = Cache.getStructures(room, STRUCTURE_CONTAINER) as StructureContainer[];
-    const containerEnergy = containers.reduce((sum, c) => sum + c.store[RESOURCE_ENERGY], 0);
-    const storageEnergy = room.storage ? room.storage.store[RESOURCE_ENERGY] : 0;
-    const dropped = Cache.getTick(`dropped_${room.name}`, () => room.find(FIND_DROPPED_RESOURCES));
-    const droppedEnergy = dropped.reduce((sum, r) => sum + (r.resourceType === RESOURCE_ENERGY ? r.amount : 0), 0);
-    
-    const totalEnergy = available + containerEnergy + storageEnergy + droppedEnergy;
+    const containers = Cache.getStructures(
+      room,
+      STRUCTURE_CONTAINER,
+    ) as StructureContainer[];
+    const containerEnergy = containers.reduce(
+      (sum, c) => sum + c.store[RESOURCE_ENERGY],
+      0,
+    );
+    const storageEnergy = room.storage
+      ? room.storage.store[RESOURCE_ENERGY]
+      : 0;
+    const dropped = Cache.getTick(`dropped_${room.name}`, () =>
+      room.find(FIND_DROPPED_RESOURCES),
+    );
+    const droppedEnergy = dropped.reduce(
+      (sum, r) => sum + (r.resourceType === RESOURCE_ENERGY ? r.amount : 0),
+      0,
+    );
+
+    const totalEnergy =
+      available + containerEnergy + storageEnergy + droppedEnergy;
     room.memory.totalEnergy = totalEnergy; // Store for other modules
 
-    // If total energy is less than what's needed for a basic recovery (e.g. 2 max creeps ~ 1000-2000), 
+    // If total energy is less than what's needed for a basic recovery (e.g. 2 max creeps ~ 1000-2000),
     // or if we literally can't spawn anything.
     if (available < 300 && capacity >= 300) {
       room.memory.energyLevel = "CRITICAL";
       return;
     }
-    
+
     // If we have capacity but total energy is extremely low, we are in a resource crisis
-    if (totalEnergy < 1000 && capacity >= 550) { // RCL 2+
-         room.memory.energyLevel = "CRITICAL";
-         return;
+    if (totalEnergy < 1000 && capacity >= 550) {
+      // RCL 2+
+      room.memory.energyLevel = "CRITICAL";
+      return;
     }
 
     let newLevel = currentLevel;
@@ -167,7 +181,7 @@ const populationModule = {
 
     // Get harvesters count for safety checks
     const harvesters = Cache.getCreepsByRole(room, "harvester").length;
-    
+
     // Analyze Task Loads
     const tasks = TaskManager.analyze(room);
 
@@ -199,13 +213,15 @@ const populationModule = {
       // Only build if we have at least 1 full harvester working?
       // Reduce builder count by 1 (min 0)
       targets.builder = Math.max(0, targets.builder - 1);
-      
+
       // But if critical sites exist, keep at least 1
-      if (tasks.construction.primaryTarget === STRUCTURE_EXTENSION || 
-          tasks.construction.primaryTarget === STRUCTURE_SPAWN) {
-          if (targets.builder === 0 && harvesters > 0) targets.builder = 1;
+      if (
+        tasks.construction.primaryTarget === STRUCTURE_EXTENSION ||
+        tasks.construction.primaryTarget === STRUCTURE_SPAWN
+      ) {
+        if (targets.builder === 0 && harvesters > 0) targets.builder = 1;
       }
-      
+
       targets.upgrader = 1;
     } else if (level === "MEDIUM") {
       // Allow calculated targets, but cap upgrader
@@ -220,7 +236,7 @@ const populationModule = {
     // Limits
     targets.builder = Math.min(targets.builder, this.config.limits.builder);
     targets.upgrader = Math.min(targets.upgrader, this.config.limits.upgrader);
-    
+
     // === 3. Hauler Calculation ===
     const haulerNeeds = this.getHaulerNeeds(room);
     targets.hauler = 0;
@@ -377,14 +393,17 @@ const populationModule = {
 
     // --- Dynamic Body Constraints based on Tasks ---
     if (role === "builder") {
-      if (tasks.construction.difficulty === "LOW" && tasks.repair.difficulty !== "HIGH") {
+      if (
+        tasks.construction.difficulty === "LOW" &&
+        tasks.repair.difficulty !== "HIGH"
+      ) {
         maxParts = Math.min(maxParts, 6); // Cap small builders for small tasks
       }
     }
     if (role === "hauler") {
-       if (tasks.transport.difficulty === "LOW") {
-         maxParts = Math.min(maxParts, 8); // Don't build massive haulers if nothing to carry
-       }
+      if (tasks.transport.difficulty === "LOW") {
+        maxParts = Math.min(maxParts, 8); // Don't build massive haulers if nothing to carry
+      }
     }
 
     // Config for each role
@@ -399,7 +418,7 @@ const populationModule = {
       harvester: {
         base: [WORK, CARRY, MOVE],
         grow: [WORK], // Harvester mainly needs WORK
-        maxGrow: 5, // Max 5 extra WORKs (Total 6 WORK = 12 energy/tick, > source capacity)
+        maxGrow: 4, // Max 4 extra WORKs (Total 5 WORK = 10 energy/tick = Source capacity)
       },
       hauler: {
         base: [CARRY, MOVE],

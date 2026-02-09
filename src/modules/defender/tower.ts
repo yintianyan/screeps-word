@@ -10,10 +10,31 @@ const towerModule = {
       const closestHostile = tower.pos.findClosestByRange(FIND_HOSTILE_CREEPS);
       if (closestHostile) {
         tower.attack(closestHostile);
-        return; // 攻击时不做其他事
+        return;
       }
 
-      // 2. 维修 (只有能量充足时才修，保留 50% 能量防守)
+      // 2. 治疗受伤的己方 Creep (战斗支援)
+      const closestDamagedCreep = tower.pos.findClosestByRange(FIND_MY_CREEPS, {
+        filter: (creep) => creep.hits < creep.hitsMax,
+      });
+      if (closestDamagedCreep) {
+        tower.heal(closestDamagedCreep);
+        return;
+      }
+
+      // 3. 紧急维修 (Rampart/Wall 即将破碎) - 无论能量多少都要修
+      const criticalWall = tower.pos.findClosestByRange(FIND_STRUCTURES, {
+        filter: (s) =>
+          (s.structureType === STRUCTURE_RAMPART ||
+            s.structureType === STRUCTURE_WALL) &&
+          s.hits < 1000,
+      });
+      if (criticalWall) {
+        tower.repair(criticalWall);
+        return;
+      }
+
+      // 4. 常规维修 (只有能量充足时才修，保留 50% 能量防守)
       // 在危机模式下，彻底禁止维修，节省每一滴能量用于孵化和防御
       const isCrisis = room.memory.energyState === "CRISIS";
       if (
@@ -21,7 +42,7 @@ const towerModule = {
         tower.store.getUsedCapacity(RESOURCE_ENERGY) >
           tower.store.getCapacity(RESOURCE_ENERGY) * 0.5
       ) {
-        // 优先修路和容器 (损耗 > 20% 才修，避免频繁切换)
+        // 4.1 优先修路和容器
         const closestDamagedStructure = tower.pos.findClosestByRange(
           FIND_STRUCTURES,
           {
@@ -40,16 +61,25 @@ const towerModule = {
           return;
         }
 
-        // 其次修墙 (Rampart/Wall) - 只修到 10k 血，避免耗光能量
-        // const closestDamagedWall = ...
-      }
+        // 4.2 其次修墙 (Rampart/Wall) - 逐步加固到安全线 (比如 50k)
+        // 只有能量很充裕 (>70%) 才干这个
+        if (
+          tower.store.getUsedCapacity(RESOURCE_ENERGY) >
+          tower.store.getCapacity(RESOURCE_ENERGY) * 0.7
+        ) {
+          const wallTarget = 50000; // 目标血量
+          const wallToRepair = tower.pos.findClosestByRange(FIND_STRUCTURES, {
+            filter: (s) =>
+              (s.structureType === STRUCTURE_RAMPART ||
+                s.structureType === STRUCTURE_WALL) &&
+              s.hits < wallTarget,
+          });
 
-      // 3. 治疗受伤的己方 Creep
-      const closestDamagedCreep = tower.pos.findClosestByRange(FIND_MY_CREEPS, {
-        filter: (creep) => creep.hits < creep.hitsMax,
-      });
-      if (closestDamagedCreep) {
-        tower.heal(closestDamagedCreep);
+          if (wallToRepair) {
+            tower.repair(wallToRepair);
+            return;
+          }
+        }
       }
     });
   },

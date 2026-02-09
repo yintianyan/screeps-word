@@ -67,10 +67,17 @@ export default class Builder extends Role {
 
     if (this.memory.working) {
       // === WORK ===
-      // 1. Critical Repairs (Hits < 10%)
+      // 1. Critical Repairs (Hits < 10% for non-walls, or < 1000 for walls/ramparts)
       const critical = this.creep.pos.findClosestByPath(FIND_STRUCTURES, {
-        filter: (s) =>
-          s.hits < s.hitsMax * 0.1 && s.structureType !== STRUCTURE_WALL,
+        filter: (s) => {
+          if (
+            s.structureType === STRUCTURE_WALL ||
+            s.structureType === STRUCTURE_RAMPART
+          ) {
+            return s.hits < 1000;
+          }
+          return s.hits < s.hitsMax * 0.1;
+        },
       });
 
       if (critical) {
@@ -107,7 +114,27 @@ export default class Builder extends Role {
         return;
       }
 
-      // 4. Nothing to do? Upgrade
+      // 4. Wall Fortification (Up to 50k)
+      // Only do this if we have decent energy in the room to avoid stalling upgrade completely
+      // But builder usually spawns when there is construction. If no construction,
+      // it falls through here.
+      const wallToFortify = this.creep.pos.findClosestByPath(FIND_STRUCTURES, {
+        filter: (s) =>
+          (s.structureType === STRUCTURE_WALL ||
+            s.structureType === STRUCTURE_RAMPART) &&
+          s.hits < 50000,
+      });
+
+      if (wallToFortify) {
+        if (this.creep.repair(wallToFortify) === ERR_NOT_IN_RANGE) {
+          this.move(wallToFortify, {
+            visualizePathStyle: { stroke: "#0000ff" },
+          });
+        }
+        return;
+      }
+
+      // 5. Nothing to do? Upgrade
       if (
         this.creep.upgradeController(
           this.creep.room.controller as StructureController,
