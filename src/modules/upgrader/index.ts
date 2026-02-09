@@ -5,9 +5,31 @@ export default class Upgrader extends Role {
     super(creep);
   }
 
+  checkState() {
+    if (this.memory.working && this.creep.store[RESOURCE_ENERGY] === 0) {
+      this.memory.working = false;
+      this.creep.say("🔄 gather");
+    }
+    if (!this.memory.working) {
+      // Switch to working if full OR has enough energy (>50%) to do meaningful work
+      // This prevents waiting forever if Hauler only delivers partial load
+      if (
+        this.creep.store.getFreeCapacity() === 0 ||
+        this.creep.store.getUsedCapacity() >
+          this.creep.store.getCapacity() * 0.5
+      ) {
+        this.memory.working = true;
+        this.creep.say("⚡ work");
+      }
+    }
+  }
+
   executeState() {
     if (this.memory.working) {
       // === UPGRADE ===
+      // Clear request flag when working
+      if (this.memory.requestingEnergy) delete this.memory.requestingEnergy;
+
       if (
         this.creep.upgradeController(
           this.creep.room.controller as StructureController,
@@ -113,17 +135,17 @@ export default class Upgrader extends Role {
           // Found a hauler, reset wait
           this.memory.waitTicks = 0;
 
-          // Only move if not in range to transfer (Range 1)
-          const range = this.creep.pos.getRangeTo(targetHauler);
-          if (range > 1) {
-            this.move(targetHauler, {
-              visualizePathStyle: {
-                stroke: "#00ff00",
-                lineStyle: "dashed",
-                opacity: 0.5,
-              },
+          // [FIX] Don't chase Hauler. Go to work spot and wait.
+          // Hauler has Active Delivery task to come to us.
+          const controller = this.creep.room.controller;
+          if (controller && !this.creep.pos.inRangeTo(controller, 3)) {
+            this.move(controller, {
+              visualizePathStyle: { stroke: "#ffaa00" },
             });
-            this.creep.say(myHauler ? "😍 meeting" : "🏃 chasing");
+            this.creep.say("📡 waiting");
+          } else {
+            // Already at work spot, just wait
+            this.creep.say("📡 ready");
           }
         } else {
           // Just wait. Don't go to source if haulers exist but are busy.

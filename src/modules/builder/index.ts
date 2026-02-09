@@ -6,6 +6,24 @@ export default class Builder extends Role {
     super(creep);
   }
 
+  checkState() {
+    if (this.memory.working && this.creep.store[RESOURCE_ENERGY] === 0) {
+      this.memory.working = false;
+      this.creep.say("🔄 gather");
+    }
+    if (!this.memory.working) {
+      // Switch to working if full OR has enough energy (>50%) to do meaningful work
+      if (
+        this.creep.store.getFreeCapacity() === 0 ||
+        this.creep.store.getUsedCapacity() >
+          this.creep.store.getCapacity() * 0.5
+      ) {
+        this.memory.working = true;
+        this.creep.say("⚡ work");
+      }
+    }
+  }
+
   executeState() {
     // 0. Energy Crisis Check
     // Use the central energy level from populationManager
@@ -205,17 +223,26 @@ export default class Builder extends Role {
           // Found a hauler, reset wait
           this.memory.waitTicks = 0;
 
-          // Only move if not in range to transfer (Range 1)
-          const range = this.creep.pos.getRangeTo(targetHauler);
-          if (range > 1) {
-            this.move(targetHauler, {
-              visualizePathStyle: {
-                stroke: "#00ff00",
-                lineStyle: "dashed",
-                opacity: 0.5,
-              },
-            });
-            this.creep.say(myHauler ? "😍 meeting" : "🏃 chasing");
+          // [FIX] Don't chase Hauler. Go to construction site and wait.
+          const sites = this.creep.room.find(FIND_CONSTRUCTION_SITES);
+          const bestSite = priorityModule.getBestTarget(sites, this.creep.pos);
+
+          if (bestSite) {
+            if (!this.creep.pos.inRangeTo(bestSite, 3)) {
+              this.move(bestSite, {
+                visualizePathStyle: { stroke: "#ffaa00" },
+              });
+              this.creep.say("📡 waiting");
+            } else {
+              this.creep.say("📡 ready");
+            }
+          } else {
+            // If no sites, maybe we are repairing? Go to spawn as default gathering point
+            const spawn = this.creep.room.find(FIND_MY_SPAWNS)[0];
+            if (spawn && !this.creep.pos.inRangeTo(spawn, 3)) {
+              this.move(spawn);
+            }
+            this.creep.say("📡 ready");
           }
         } else {
           // Just wait. Don't go to source if haulers exist but are busy.

@@ -11,9 +11,17 @@ export default class Hauler extends Role {
       this.memory.working = false; // Go to Collect
       this.creep.say("🔄 collect");
     }
-    if (!this.memory.working && this.creep.store.getFreeCapacity() === 0) {
-      this.memory.working = true; // Go to Deliver
-      this.creep.say("🚚 deliver");
+    // [FIX] Don't wait for 100% full. If we have > 90% or plenty of energy (e.g. > 400), go deliver.
+    // Especially if capacity is large.
+    if (!this.memory.working) {
+        const free = this.creep.store.getFreeCapacity();
+        const used = this.creep.store.getUsedCapacity();
+        // If full or mostly full (free < 50 which is 1 part)
+        // Or if we have a decent load (> 400) and no nearby pile?
+        if (free === 0 || (free < 50 && used > 0)) {
+            this.memory.working = true;
+            this.creep.say("🚚 deliver");
+        }
     }
 
     // Opportunistic Pickup: If moving to collect/deliver and see dropped energy on/near position
@@ -21,6 +29,31 @@ export default class Hauler extends Role {
     if (dropped && dropped.resourceType === RESOURCE_ENERGY) {
       this.creep.pickup(dropped);
     }
+  }
+
+  // Helper for opportunistic transfer
+  private checkOpportunisticTransfer() {
+     // Only if we have energy
+     if (this.creep.store[RESOURCE_ENERGY] > 0) {
+         const neighbors = this.creep.pos.findInRange(FIND_MY_CREEPS, 1);
+         for (const neighbor of neighbors) {
+             if (neighbor.id === this.creep.id) continue;
+             // Only feed Upgraders/Builders who need energy
+             if ((neighbor.memory.role === 'upgrader' || neighbor.memory.role === 'builder') && 
+                 neighbor.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
+                 
+                 this.creep.transfer(neighbor, RESOURCE_ENERGY);
+                 this.creep.say("🤝 pass");
+                 break; // One transfer per tick
+             }
+         }
+     }
+  }
+
+  // Override move to include opportunistic transfer during task execution
+  move(target: RoomPosition | { pos: RoomPosition } | Structure, opts = {}) {
+      this.checkOpportunisticTransfer();
+      return super.move(target, opts);
   }
 
   executeState() {
@@ -118,10 +151,9 @@ export default class Hauler extends Role {
         const needyUpgraders = this.creep.room.find(FIND_MY_CREEPS, {
           filter: (c) =>
             c.memory.role === "upgrader" &&
-            c.memory.working &&
+            (c.memory.working || c.memory.requestingEnergy) &&
             c.store.getFreeCapacity(RESOURCE_ENERGY) >
-              c.store.getCapacity() * 0.5 &&
-            !c.pos.inRangeTo(this.creep.room.controller, 1),
+              c.store.getCapacity() * 0.5,
         });
         needyUpgraders.forEach((u) => {
           candidates.push({
