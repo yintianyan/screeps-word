@@ -83,13 +83,16 @@ const structurePlanner = {
   execute: function (room, analysis) {
     if (!analysis) return;
 
-    // 异常处理：资源不足暂停建造
-    // 只有当有工地时才检查这个，或者在 createConstructionSite 前检查
-    // 这里我们设定一个软阈值，如果房间能量极低 (<300)，暂缓规划新工地
-    if (
-      room.energyAvailable < 300 &&
-      room.find(FIND_MY_CONSTRUCTION_SITES).length > 0
-    ) {
+    // 1. 全局工地数量检查 (Throttling)
+    // 防止一次性铺设过多工地，导致 Builder 跑断腿且能量枯竭
+    // 如果现有工地超过 10 个，暂停所有新规划
+    const existingSites = room.find(FIND_MY_CONSTRUCTION_SITES);
+    if (existingSites.length > 10) {
+      return;
+    }
+
+    // 2. 异常处理：资源不足暂停建造
+    if (room.energyAvailable < 300 && existingSites.length > 0) {
       return;
     }
 
@@ -458,37 +461,34 @@ const structurePlanner = {
    * 辅助：构建道路 (支持简易双车道)
    */
   buildHighway: function (room, path) {
-    path.forEach((step, index) => {
+    let sitesCreated = 0;
+    const maxNewSites = 5; // 每次最多规划 5 个道路工地，防止刷屏
+
+    for (let index = 0; index < path.length; index++) {
+      // 检查全局工地限制
+      if (room.find(FIND_MY_CONSTRUCTION_SITES).length > 10) break;
+      if (sitesCreated >= maxNewSites) break;
+
+      const step = path[index];
       const pos = new RoomPosition(step.x, step.y, room.name);
+
       // 1. 主车道
       if (room.getTerrain().get(step.x, step.y) !== TERRAIN_MASK_WALL) {
-        room.createConstructionSite(pos, STRUCTURE_ROAD);
-      }
+        // 检查是否已有路或工地
+        const structures = pos.lookFor(LOOK_STRUCTURES);
+        const hasRoad = structures.some(
+          (s) => s.structureType === STRUCTURE_ROAD,
+        );
+        const sites = pos.lookFor(LOOK_CONSTRUCTION_SITES);
 
-      // 2. 副车道 (可选：如果需要双车道)
-      // 简单逻辑：计算法线方向偏移
-      let nextStep = path[index + 1];
-      let dx = 0,
-        dy = 0;
-      if (nextStep) {
-        dx = nextStep.x - step.x;
-        dy = nextStep.y - step.y;
-      } else if (index > 0) {
-        let prevStep = path[index - 1];
-        dx = step.x - prevStep.x;
-        dy = step.y - prevStep.y;
-      }
-
-      if (dx !== 0 || dy !== 0) {
-        const sideX = step.x - dy;
-        const sideY = step.y + dx;
-        if (sideX > 1 && sideX < 48 && sideY > 1 && sideY < 48) {
-          if (room.getTerrain().get(sideX, sideY) !== TERRAIN_MASK_WALL) {
-            room.createConstructionSite(sideX, sideY, STRUCTURE_ROAD);
-          }
+        if (!hasRoad && sites.length === 0) {
+          const result = room.createConstructionSite(pos, STRUCTURE_ROAD);
+          if (result === OK) sitesCreated++;
         }
       }
-    });
+
+      // 2. 副车道 (可选) - 暂时省略以节省 CPU 和 能量
+    }
   },
 
   /**

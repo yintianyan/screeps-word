@@ -166,10 +166,17 @@ export class EconomyCenter {
 
       if (
         site.structureType === STRUCTURE_SPAWN ||
-        site.structureType === STRUCTURE_EXTENSION
+        site.structureType === STRUCTURE_EXTENSION ||
+        site.structureType === STRUCTURE_TOWER // [Recovery] Towers are critical
       ) {
         priority = TaskPriority.HIGH;
         maxCreeps = 5;
+      } else if (
+        site.structureType === STRUCTURE_CONTAINER ||
+        site.structureType === STRUCTURE_STORAGE
+      ) {
+        priority = TaskPriority.HIGH; // [Recovery] Logistics are critical
+        maxCreeps = 3;
       } else if (
         site.structureType === STRUCTURE_RAMPART ||
         site.structureType === STRUCTURE_WALL

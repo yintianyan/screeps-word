@@ -57,6 +57,10 @@ const moveModule = {
         reusePath: 20, // 增加复用
         ignoreCreeps: true, // 默认忽略
         range: 1,
+        // [Optimization] 强制设置地形权重，使 Creep 优先走 Roads (1)
+        plainCost: 2,
+        swampCost: 10,
+
         // 添加 CostCallback 实现车道偏好
         costCallback: function (roomName: string, costMatrix: CostMatrix) {
           if (roomName !== creep.room.name) return;
@@ -82,9 +86,11 @@ const moveModule = {
           // 4. 车道偏好 (仅在未严重卡住时使用)
           if (stuckCount < 8) {
             let direction = 0;
-            
-            const targetPos = (target as any).pos ? (target as any).pos : target;
-            
+
+            const targetPos = (target as any).pos
+              ? (target as any).pos
+              : target;
+
             const dx = targetPos.x - creep.pos.x;
             const dy = targetPos.y - creep.pos.y;
 
@@ -183,15 +189,16 @@ const moveModule = {
           continue;
         if (terrain.get(pos.x, pos.y) === TERRAIN_MASK_WALL) continue;
         if (pos.lookFor(LOOK_CREEPS).length > 0) continue;
-        
+
         const structures = pos.lookFor(LOOK_STRUCTURES);
-        // OBSTACLE_OBJECT_TYPES is defined in constants.js/ts globally in screeps usually, 
-        // but here we might need to be careful. 
+        // OBSTACLE_OBJECT_TYPES is defined in constants.js/ts globally in screeps usually,
+        // but here we might need to be careful.
         // Standard check:
-        const isObstacle = structures.some(s => 
-             s.structureType !== STRUCTURE_ROAD && 
-             s.structureType !== STRUCTURE_CONTAINER && 
-             (OBSTACLE_OBJECT_TYPES as string[]).includes(s.structureType)
+        const isObstacle = structures.some(
+          (s) =>
+            s.structureType !== STRUCTURE_ROAD &&
+            s.structureType !== STRUCTURE_CONTAINER &&
+            (OBSTACLE_OBJECT_TYPES as string[]).includes(s.structureType),
         );
 
         if (isObstacle) continue;
@@ -202,7 +209,9 @@ const moveModule = {
         // 3. 避免再次进入狭窄通道 (检查周围空位数量)
         const targetPos = (target as any).pos || target;
         let score = (20 - pos.getRangeTo(targetPos)) * 1;
-        const isOnRoad = structures.some((s) => s.structureType === STRUCTURE_ROAD);
+        const isOnRoad = structures.some(
+          (s) => s.structureType === STRUCTURE_ROAD,
+        );
         if (!isOnRoad) score += 50;
 
         // 检查周围空位
@@ -223,20 +232,23 @@ const moveModule = {
       if (possiblePos.length > 0) {
         const best = _.maxBy(possiblePos, (p) => p.score);
         if (best) {
-            // 如果当前位置分值已经很高（不在路上），则原地等待
-            const currentIsOnRoad = this.isOnRoad(creep);
-            if (!currentIsOnRoad && best.score < 60) {
-              creep.say("💤 parking");
-              return;
-            }
-            creep.move(creep.pos.getDirectionTo(best.pos));
+          // 如果当前位置分值已经很高（不在路上），则原地等待
+          const currentIsOnRoad = this.isOnRoad(creep);
+          if (!currentIsOnRoad && best.score < 60) {
+            creep.say("💤 parking");
             return;
+          }
+          creep.move(creep.pos.getDirectionTo(best.pos));
+          return;
         }
       }
     }
 
     // === 正常移动执行 ===
-    const result = creep.moveTo(target as RoomPosition | { pos: RoomPosition }, moveOpts);
+    const result = creep.moveTo(
+      target as RoomPosition | { pos: RoomPosition },
+      moveOpts,
+    );
 
     // === 响应同伴请求 (后置处理) ===
     // 如果本 tick 移动失败，或者没有移动意图，尝试响应之前的请求
@@ -252,7 +264,7 @@ const moveModule = {
       // 注意：这里的 dir 是请求者相对于我的方向，所以我要移向请求者
       // 但其实更简单的做法是直接移向请求者的位置
       const oppositeDir = ((dir + 3) % 8) + 1;
-      
+
       creep.move(oppositeDir as DirectionConstant);
       creep.say("🔄 OK");
       console.log(
@@ -266,11 +278,11 @@ const moveModule = {
       if (stuckCount > 5) {
         creep.say("🚫 trapped");
         // 尝试向反方向退一步，腾出空间
-        
+
         const targetPos = (target as any).pos || target;
         const dirToTarget = creep.pos.getDirectionTo(targetPos);
         const oppositeDir = ((dirToTarget + 3) % 8) + 1;
-        
+
         creep.move(oppositeDir as DirectionConstant);
       }
     }
@@ -318,7 +330,11 @@ const moveModule = {
    * @param {RoomPosition|Object} anchor (可选) 要保持在其附近的目标
    * @param {number} range (可选) 离锚点的最大范围
    */
-  parkOffRoad: function (creep: Creep, anchor: RoomPosition | { pos: RoomPosition } | null = null, range = 1) {
+  parkOffRoad: function (
+    creep: Creep,
+    anchor: RoomPosition | { pos: RoomPosition } | null = null,
+    range = 1,
+  ) {
     if ((creep as any)._moveExecuted) return;
     if (!this.isOnRoad(creep)) return; // 已经在非道路上
 
@@ -366,8 +382,8 @@ const moveModule = {
 
         // 检查锚点范围
         if (anchor) {
-            const anchorPos = (anchor as any).pos || anchor;
-            if (!pos.inRangeTo(anchorPos, range)) continue;
+          const anchorPos = (anchor as any).pos || anchor;
+          if (!pos.inRangeTo(anchorPos, range)) continue;
         }
 
         adjacent.push(pos);
@@ -400,7 +416,7 @@ const moveModule = {
       const dir = moveRequest.dir;
       // 反向移动实现对穿
       const oppositeDir = ((dir + 3) % 8) + 1;
-      
+
       creep.move(oppositeDir as DirectionConstant);
       creep.say("🔄 yield");
       (creep as any)._moveExecuted = true;
