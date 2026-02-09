@@ -107,15 +107,48 @@ export class EconomyCenter {
 
   private static generateBuildTasks(room: Room) {
     const sites = room.find(FIND_MY_CONSTRUCTION_SITES);
+
+    // [Reserve Logic]
+    const storedEnergy = room.storage
+      ? room.storage.store[RESOURCE_ENERGY]
+      : room.energyAvailable;
+    const isCriticalEnergy = storedEnergy < 10000; // Hard limit for survival
+    const isReserveMode =
+      storedEnergy < 50000 && room.controller && room.controller.level >= 4;
+
     sites.forEach((site) => {
+      // Skip non-critical construction in critical energy mode
+      if (isCriticalEnergy) {
+        if (
+          site.structureType !== STRUCTURE_SPAWN &&
+          site.structureType !== STRUCTURE_EXTENSION &&
+          site.structureType !== STRUCTURE_TOWER &&
+          site.structureType !== STRUCTURE_CONTAINER
+        ) {
+          return;
+        }
+      }
+
       const taskId = `BUILD_${site.id}`;
       // Determine priority based on structure type
       let priority = TaskPriority.NORMAL;
+      let maxCreeps = 3;
+
       if (
         site.structureType === STRUCTURE_SPAWN ||
         site.structureType === STRUCTURE_EXTENSION
       ) {
         priority = TaskPriority.HIGH;
+        maxCreeps = 5;
+      } else if (
+        site.structureType === STRUCTURE_RAMPART ||
+        site.structureType === STRUCTURE_WALL
+      ) {
+        priority = TaskPriority.LOW;
+        maxCreeps = isReserveMode ? 1 : 2; // Limit wall building when saving energy
+      } else if (site.structureType === STRUCTURE_ROAD) {
+        priority = TaskPriority.LOW;
+        maxCreeps = 1;
       }
 
       GlobalDispatch.registerTask({
@@ -124,11 +157,13 @@ export class EconomyCenter {
         priority: priority,
         targetId: site.id,
         pos: site.pos,
-        maxCreeps: 3,
+        maxCreeps: maxCreeps,
         creepsAssigned: [],
         requirements: {
           bodyParts: [WORK, CARRY],
         },
+        validRoles: ["builder", "repairer"],
+        estimatedDuration: Math.min(site.progressTotal - site.progress, 500), // Estimate based on remaining work
         creationTime: Game.time,
         data: {},
       });
@@ -139,18 +174,53 @@ export class EconomyCenter {
     if (!room.controller) return;
 
     const taskId = `UPGRADE_${room.name}`;
-    // Always need upgrading
+
+    // [Reserve Logic]
+    const storedEnergy = room.storage
+      ? room.storage.store[RESOURCE_ENERGY]
+      : room.energyAvailable;
+    const isEmergency = storedEnergy < 5000;
+    const isReserveMode = storedEnergy < 50000;
+
+    // Default: Normal upgrade
+    let priority = TaskPriority.NORMAL;
+    let maxCreeps = 3;
+    let sticky = true;
+
+    // Logic:
+    // 1. If downgrading soon -> CRITICAL, ignore energy limits
+    if (room.controller.ticksToDowngrade < 4000) {
+      priority = TaskPriority.CRITICAL;
+      maxCreeps = 1; // Just one to save it
+    }
+    // 2. If Emergency (<5k) -> Stop upgrading unless downgrading
+    else if (isEmergency) {
+      return;
+    }
+    // 3. If Reserve Mode (<50k) -> Limit to 1 upgrader, Lower Priority
+    else if (isReserveMode) {
+      priority = TaskPriority.LOW;
+      maxCreeps = 1;
+      sticky = false; // Allow reassignment to better tasks
+    }
+    // 4. If Rich (>100k) -> Boost
+    else if (storedEnergy > 100000) {
+      maxCreeps = 5;
+    }
+
     GlobalDispatch.registerTask({
       id: taskId,
       type: "UPGRADE",
-      priority: TaskPriority.NORMAL,
+      priority: priority,
       targetId: room.controller.id,
       pos: room.controller.pos,
-      maxCreeps: 5, // Configurable
+      maxCreeps: maxCreeps, // Configurable
       creepsAssigned: [],
       requirements: {
         bodyParts: [WORK, CARRY],
       },
+      validRoles: ["upgrader"],
+      sticky: sticky,
       creationTime: Game.time,
       data: {},
     });
