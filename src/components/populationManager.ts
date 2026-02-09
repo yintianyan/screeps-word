@@ -89,7 +89,12 @@ const populationModule = {
     }
 
     // If we have capacity but total energy is extremely low, we are in a resource crisis
-    if (totalEnergy < 1000 && capacity >= 550) {
+    // RCL 3 threshold: 2000 (containers empty)
+    // RCL 4+ threshold: 5000 (storage empty)
+    const crisisThreshold =
+      room.controller && room.controller.level >= 4 ? 5000 : 2000;
+
+    if (totalEnergy < crisisThreshold && capacity >= 550) {
       // RCL 2+
       room.memory.energyLevel = "CRITICAL";
       return;

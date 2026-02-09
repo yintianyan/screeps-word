@@ -112,28 +112,34 @@ export class EconomyCenter {
     const sites = room.find(FIND_MY_CONSTRUCTION_SITES);
 
     // [Reserve Logic]
-    // Calculate total energy (Spawn + Containers)
-    const containers = Cache.getStructures(
-      room,
-      STRUCTURE_CONTAINER,
-    ) as StructureContainer[];
-    const containerEnergy = containers.reduce(
-      (sum, c) => sum + c.store[RESOURCE_ENERGY],
-      0,
-    );
-    const storedEnergy =
-      (room.storage
-        ? room.storage.store[RESOURCE_ENERGY]
-        : room.energyAvailable) + containerEnergy;
+    // Calculate total energy (Spawn + Containers + Storage)
+    let storedEnergy = 0;
+    if (room.storage) {
+      storedEnergy = room.storage.store[RESOURCE_ENERGY];
+    } else {
+      const containers = Cache.getStructures(
+        room,
+        STRUCTURE_CONTAINER,
+      ) as StructureContainer[];
+      storedEnergy = containers.reduce(
+        (sum, c) => sum + c.store[RESOURCE_ENERGY],
+        0,
+      );
+      storedEnergy += room.energyAvailable;
+    }
 
     // Adjusted Thresholds for RCL 3
     // Critical: Less than 1000 total reserve (Spawn is ~500-800)
-    const isCriticalEnergy = storedEnergy < 1000;
+    // Same as SupremeCommand to avoid flickering
+    const crisisThreshold =
+      room.controller && room.controller.level >= 4 ? 5000 : 2000;
+    const isCriticalEnergy = storedEnergy < crisisThreshold;
+
     // Reserve Mode: If no storage, treat low container level as reserve mode
     // RCL 3 cap is ~2000 per container * 2 = 4000.
     const isReserveMode =
       (room.storage && storedEnergy < 50000) ||
-      (!room.storage && storedEnergy < 2000);
+      (!room.storage && storedEnergy < 3000);
 
     // [NEW] Road Construction Threshold
     // Only build roads if we have significant surplus (e.g. > 80% full containers or Storage)
@@ -148,7 +154,8 @@ export class EconomyCenter {
           site.structureType !== STRUCTURE_SPAWN &&
           site.structureType !== STRUCTURE_EXTENSION &&
           site.structureType !== STRUCTURE_TOWER &&
-          site.structureType !== STRUCTURE_CONTAINER
+          site.structureType !== STRUCTURE_CONTAINER &&
+          site.structureType !== STRUCTURE_STORAGE
         ) {
           return;
         }
@@ -213,25 +220,29 @@ export class EconomyCenter {
     const taskId = `UPGRADE_${room.name}`;
 
     // [Reserve Logic]
-    // Calculate total energy (Spawn + Containers)
-    const containers = Cache.getStructures(
-      room,
-      STRUCTURE_CONTAINER,
-    ) as StructureContainer[];
-    const containerEnergy = containers.reduce(
-      (sum, c) => sum + c.store[RESOURCE_ENERGY],
-      0,
-    );
-    const storedEnergy =
-      (room.storage
-        ? room.storage.store[RESOURCE_ENERGY]
-        : room.energyAvailable) + containerEnergy;
+    // Calculate total energy (Spawn + Containers + Storage)
+    let storedEnergy = 0;
+    if (room.storage) {
+      storedEnergy = room.storage.store[RESOURCE_ENERGY];
+    } else {
+      const containers = Cache.getStructures(
+        room,
+        STRUCTURE_CONTAINER,
+      ) as StructureContainer[];
+      storedEnergy = containers.reduce(
+        (sum, c) => sum + c.store[RESOURCE_ENERGY],
+        0,
+      );
+      storedEnergy += room.energyAvailable;
+    }
 
     // Adjusted Thresholds
-    const isEmergency = storedEnergy < 1000; // Very low
+    const crisisThreshold =
+      room.controller && room.controller.level >= 4 ? 5000 : 2000;
+    const isEmergency = storedEnergy < crisisThreshold;
     const isReserveMode =
       (room.storage && storedEnergy < 50000) ||
-      (!room.storage && storedEnergy < 2000);
+      (!room.storage && storedEnergy < 3000);
 
     // Default: Normal upgrade
     let priority = TaskPriority.NORMAL;
@@ -244,7 +255,7 @@ export class EconomyCenter {
       priority = TaskPriority.CRITICAL;
       maxCreeps = 1; // Just one to save it
     }
-    // 2. If Emergency (<1k total) -> Stop upgrading unless downgrading
+    // 2. If Emergency (< Crisis Threshold) -> Stop upgrading unless downgrading
     else if (isEmergency) {
       return;
     }
@@ -254,7 +265,7 @@ export class EconomyCenter {
       maxCreeps = 1;
       sticky = false; // Allow reassignment to better tasks
     }
-    // 4. If Rich (>100k or full containers) -> Boost
+    // 4. If Rich (>100k or >3500 without storage) -> Boost
     else if (storedEnergy > 100000 || (!room.storage && storedEnergy > 3500)) {
       maxCreeps = 5;
     }

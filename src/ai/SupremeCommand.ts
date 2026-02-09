@@ -48,15 +48,51 @@ export class SupremeCommand {
     }
 
     // 2. Energy Crisis Check
-    const storedEnergy = room.storage
-      ? room.storage.store[RESOURCE_ENERGY]
-      : room.energyAvailable;
-    if (storedEnergy < 5000 && room.controller && room.controller.level >= 3) {
+    // [Fix] Include Container energy for RCL 3 rooms without storage
+    let storedEnergy = 0;
+    if (room.storage) {
+      storedEnergy = room.storage.store[RESOURCE_ENERGY];
+    } else {
+      const containers = room.find(FIND_STRUCTURES, {
+        filter: (s) => s.structureType === STRUCTURE_CONTAINER,
+      }) as StructureContainer[];
+      storedEnergy = containers.reduce(
+        (sum, c) => sum + c.store[RESOURCE_ENERGY],
+        0,
+      );
+
+      // Add current spawn energy (important for early game)
+      storedEnergy += room.energyAvailable;
+    }
+
+    // Thresholds:
+    // RCL 3: Crisis < 2000 (Basically empty containers)
+    // RCL 4+: Crisis < 5000
+    const threshold =
+      room.controller && room.controller.level >= 4 ? 5000 : 2000;
+
+    if (
+      storedEnergy < threshold &&
+      room.controller &&
+      room.controller.level >= 3
+    ) {
       // Severe energy crisis in established room
       if (room.memory.energyLevel !== "CRITICAL") {
         room.memory.energyLevel = "CRITICAL";
         console.log(
-          `[SupremeCommand] 🚨 ENERGY CRISIS DECLARED in ${room.name}`,
+          `[SupremeCommand] 🚨 ENERGY CRISIS DECLARED in ${room.name} (Stored: ${storedEnergy} < ${threshold})`,
+        );
+      }
+    } else {
+      // Recovery mechanism: If energy is back to safe levels, clear CRITICAL
+      // Hysteresis: Require 2x threshold to exit crisis
+      if (
+        room.memory.energyLevel === "CRITICAL" &&
+        storedEnergy > threshold * 1.5
+      ) {
+        room.memory.energyLevel = "LOW"; // Reset to LOW or calculate properly
+        console.log(
+          `[SupremeCommand] ✅ ENERGY CRISIS RESOLVED in ${room.name} (Stored: ${storedEnergy})`,
         );
       }
     }
