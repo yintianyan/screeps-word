@@ -343,6 +343,48 @@ const monitorModule = {
         creep.memory.idleTicks = 0;
       }
     });
+    // 5. Dispatch System Visualization (New)
+    const dispatch = Memory.dispatch;
+    if (dispatch) {
+        row += 1.0;
+        visual.text(`📡 调度中心:`, x, row, { align: "left", font: 0.7, color: "#ffffff" });
+        row += 0.8;
+        
+        // Count tasks
+        let taskCount = 0;
+        for (const id in dispatch.tasks) { taskCount++; }
+        
+        // Count active assignments
+        let assignCount = 0;
+        for (const id in dispatch.assignments) { assignCount++; }
+        
+        visual.text(`Tasks: ${taskCount} | Assigned: ${assignCount}`, x, row, {
+            align: "left", font: 0.5, color: "#aaaaaa"
+        });
+        
+        // Draw Task Lines
+        for (const creepId in dispatch.assignments) {
+            const creep = Game.creeps[creepId];
+            if (!creep || creep.room.name !== room.name) continue;
+            
+            const taskId = dispatch.assignments[creepId];
+            const task = dispatch.tasks[taskId];
+            if (task && task.pos) {
+                // Determine color based on priority
+                let color = "#ffffff";
+                if (task.priority === 0) color = "#ff0000"; // Critical
+                else if (task.priority === 1) color = "#ff00ff"; // High
+                else if (task.priority === 2) color = "#00ff00"; // Normal
+                
+                visual.line(creep.pos, new RoomPosition(task.pos.x, task.pos.y, task.pos.roomName), {
+                    color: color, width: 0.1, lineStyle: "dotted", opacity: 0.5
+                });
+                visual.circle(new RoomPosition(task.pos.x, task.pos.y, task.pos.roomName), {
+                    fill: "transparent", radius: 0.3, stroke: color, opacity: 0.5
+                });
+            }
+        }
+    }
   },
 };
 

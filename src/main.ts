@@ -9,10 +9,22 @@ import trafficModule from "./components/trafficManager";
 import Lifecycle from "./components/roomManager";
 import brainModule from "./ai/brainModule";
 
+// [NEW] Dispatch System Modules
+import { SupremeCommand } from "./ai/SupremeCommand";
+import { EconomyCenter } from "./centers/EconomyCenter";
+import { DefenseCenter } from "./centers/DefenseCenter";
+import { GlobalDispatch } from "./ai/GlobalDispatch";
+
 // === 注册模块 ===
 
 // 0. 大脑决策 - 房间级别 (最优先)
 Kernel.register("brain", brainModule);
+Kernel.register("supreme", SupremeCommand); // [NEW] Strategic AI
+
+// 0.5 调度中心 (任务生成)
+Kernel.register("economy", EconomyCenter); // [NEW]
+Kernel.register("defense", DefenseCenter); // [NEW]
+Kernel.register("dispatch", GlobalDispatch); // [NEW] Task Assignment
 
 // 1. 核心逻辑 (人口 & 孵化) - 房间级别
 Kernel.register("population", populationModule); // 仅计算
