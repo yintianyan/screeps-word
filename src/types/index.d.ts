@@ -17,6 +17,9 @@ declare global {
       idleTicks: number;
       totalTicks: number;
     };
+    // Remote Specific
+    targetRoom?: string;
+    homeRoom?: string;
     _move?: any;
     _moveRequest?: any;
     [key: string]: any;
@@ -62,6 +65,11 @@ declare global {
   interface RoomMemory {
     avoid?: any;
     energyLevel?: "CRITICAL" | "LOW" | "MEDIUM" | "HIGH";
+    remotes?: string[]; // List of remote rooms to mine
+    scout?: {
+      lastScan: number;
+      status: "pending" | "active" | "completed";
+    };
     [key: string]: any;
   }
 

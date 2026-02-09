@@ -591,6 +591,9 @@ const populationModule = {
       hauler: { base: [CARRY, MOVE], grow: [CARRY, MOVE] },
       upgrader: { base: [WORK, CARRY, MOVE], grow: [WORK, WORK, MOVE] },
       builder: { base: [WORK, CARRY, MOVE], grow: [WORK, CARRY, MOVE] },
+      scout: { base: [MOVE], grow: [] }, // Scout is just 1 MOVE
+      remote_harvester: { base: [WORK, WORK, MOVE, MOVE], grow: [WORK, MOVE] }, // 1:1 WORK:MOVE for speed? Or Efficiency?
+      remote_hauler: { base: [CARRY, CARRY, MOVE], grow: [CARRY, CARRY, MOVE] }, // 2:1 CARRY:MOVE (Roads) or 1:1 (Plain)? Assume 1:1 for safety
     };
 
     const config = configs[role] || configs.harvester;

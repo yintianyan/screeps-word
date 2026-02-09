@@ -1,25 +1,24 @@
 // Task Types
-export type TaskType =
-  | "HARVEST"
-  | "TRANSFER"
-  | "UPGRADE"
-  | "BUILD"
-  | "REPAIR"
-  | "DEFEND"
-  | "ATTACK"
-  | "HEAL"
-  | "SCOUT"
-  | "CLAIM"
-  | "RESERVE"
-  | "PICKUP";
+export enum TaskType {
+  HARVEST = "harvest",
+  BUILD = "build",
+  UPGRADE = "upgrade",
+  REPAIR = "repair",
+  HAUL = "haul",
+  REMOTE_HARVEST = "remote_harvest", // [NEW]
+  REMOTE_HAUL = "remote_haul", // [NEW]
+  SCOUT = "scout", // [NEW]
+  ATTACK = "attack",
+}
 
 // Priority Levels
 export enum TaskPriority {
   CRITICAL = 0, // Emergency defense, spawn refill
   HIGH = 1, // Tower refill, decay prevention
-  NORMAL = 2, // Regular harvesting, upgrading
-  LOW = 3, // Wall building, road repair
-  IDLE = 4, // Scouting, signing controller
+  MEDIUM = 2, // [NEW] User Defined Medium
+  NORMAL = 3, // Regular harvesting, upgrading
+  LOW = 4, // Wall building, road repair
+  IDLE = 5, // Scouting, signing controller
 }
 
 // Task Interface

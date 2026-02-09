@@ -18,6 +18,10 @@ import { GlobalDispatch } from "./ai/GlobalDispatch";
 import { DataCenter } from "./centers/DataCenter";
 import { RoomCollector } from "./modules/data/RoomCollector";
 import { Dashboard } from "./visuals/Dashboard";
+import { RemoteManager } from "./modules/remote/RemoteManager";
+import scout from "./roles/scout";
+import remoteHarvester from "./roles/remoteHarvester";
+import remoteHauler from "./roles/remoteHauler";
 
 // === 注册模块 ===
 
@@ -41,6 +45,7 @@ Kernel.register("spawner", spawnerModule); // 孵化执行
 Kernel.register("planner", structurePlanner);
 Kernel.register("collector", RoomCollector); // [NEW] Data Collector
 Kernel.register("dashboard", Dashboard); // [NEW] Visualization
+Kernel.register("remote", RemoteManager); // [NEW] Remote Mining
 
 // 3. 防御与监控 - 房间级别
 Kernel.register("tower", towerModule);
@@ -48,6 +53,10 @@ Kernel.register("monitor", monitorModule);
 Kernel.register("traffic", trafficModule);
 
 // 4. 全局逻辑 - 全局级别
+// 注册新角色到 creepsModule
+creepsModule.register("scout", scout);
+creepsModule.register("remote_harvester", remoteHarvester);
+creepsModule.register("remote_hauler", remoteHauler);
 Kernel.register("creeps", creepsModule, "global");
 
 export const loop = function () {

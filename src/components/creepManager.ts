@@ -1,8 +1,10 @@
-
 import Harvester from "../modules/harvester/index";
 import Hauler from "../modules/hauler/index";
 import Upgrader from "../modules/upgrader/index";
 import Builder from "../modules/builder/index";
+import Scout from "../roles/scout";
+import RemoteHarvester from "../roles/remoteHarvester";
+import RemoteHauler from "../roles/remoteHauler";
 import Logger from "../utils/logger";
 import moveModule from "../utils/movement";
 
@@ -17,7 +19,15 @@ const creepsModule = {
     hauler: Hauler,
     upgrader: Upgrader,
     builder: Builder,
+    scout: Scout,
+    remote_harvester: RemoteHarvester,
+    remote_hauler: RemoteHauler,
   } as any,
+
+  // 注册新角色
+  register: function (roleName: string, roleClass: any) {
+    this.roles[roleName] = roleClass;
+  },
 
   // 作为全局模块运行
   run: function () {
