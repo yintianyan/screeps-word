@@ -642,19 +642,22 @@ const populationModule = {
         // Calculate Total Usable Energy (Spawn + Ext + Storage + Containers + Dropped)
         const containers = Cache.getStructures(room, STRUCTURE_CONTAINER);
         const containerEnergy = containers.reduce((sum, c) => sum + c.store[RESOURCE_ENERGY], 0);
-        const storageEnergy = room.storage ? room.storage.store[RESOURCE_ENERGY] : 0;
+        const storageEnergy = room.storage
+            ? room.storage.store[RESOURCE_ENERGY]
+            : 0;
         const dropped = Cache.getTick(`dropped_${room.name}`, () => room.find(FIND_DROPPED_RESOURCES));
         const droppedEnergy = dropped.reduce((sum, r) => sum + (r.resourceType === RESOURCE_ENERGY ? r.amount : 0), 0);
         const totalEnergy = available + containerEnergy + storageEnergy + droppedEnergy;
         room.memory.totalEnergy = totalEnergy; // Store for other modules
-        // If total energy is less than what's needed for a basic recovery (e.g. 2 max creeps ~ 1000-2000), 
+        // If total energy is less than what's needed for a basic recovery (e.g. 2 max creeps ~ 1000-2000),
         // or if we literally can't spawn anything.
         if (available < 300 && capacity >= 300) {
             room.memory.energyLevel = "CRITICAL";
             return;
         }
         // If we have capacity but total energy is extremely low, we are in a resource crisis
-        if (totalEnergy < 1000 && capacity >= 550) { // RCL 2+
+        if (totalEnergy < 1000 && capacity >= 550) {
+            // RCL 2+
             room.memory.energyLevel = "CRITICAL";
             return;
         }
@@ -906,7 +909,8 @@ const populationModule = {
             maxParts = 3;
         // --- Dynamic Body Constraints based on Tasks ---
         if (role === "builder") {
-            if (tasks.construction.difficulty === "LOW" && tasks.repair.difficulty !== "HIGH") {
+            if (tasks.construction.difficulty === "LOW" &&
+                tasks.repair.difficulty !== "HIGH") {
                 maxParts = Math.min(maxParts, 6); // Cap small builders for small tasks
             }
         }
@@ -920,7 +924,7 @@ const populationModule = {
             harvester: {
                 base: [WORK, CARRY, MOVE],
                 grow: [WORK], // Harvester mainly needs WORK
-                maxGrow: 5, // Max 5 extra WORKs (Total 6 WORK = 12 energy/tick, > source capacity)
+                maxGrow: 4, // Max 4 extra WORKs (Total 5 WORK = 10 energy/tick = Source capacity)
             },
             hauler: {
                 base: [CARRY, MOVE],
@@ -1576,15 +1580,33 @@ const towerModule = {
             const closestHostile = tower.pos.findClosestByRange(FIND_HOSTILE_CREEPS);
             if (closestHostile) {
                 tower.attack(closestHostile);
-                return; // 攻击时不做其他事
+                return;
             }
-            // 2. 维修 (只有能量充足时才修，保留 50% 能量防守)
+            // 2. 治疗受伤的己方 Creep (战斗支援)
+            const closestDamagedCreep = tower.pos.findClosestByRange(FIND_MY_CREEPS, {
+                filter: (creep) => creep.hits < creep.hitsMax,
+            });
+            if (closestDamagedCreep) {
+                tower.heal(closestDamagedCreep);
+                return;
+            }
+            // 3. 紧急维修 (Rampart/Wall 即将破碎) - 无论能量多少都要修
+            const criticalWall = tower.pos.findClosestByRange(FIND_STRUCTURES, {
+                filter: (s) => (s.structureType === STRUCTURE_RAMPART ||
+                    s.structureType === STRUCTURE_WALL) &&
+                    s.hits < 1000,
+            });
+            if (criticalWall) {
+                tower.repair(criticalWall);
+                return;
+            }
+            // 4. 常规维修 (只有能量充足时才修，保留 50% 能量防守)
             // 在危机模式下，彻底禁止维修，节省每一滴能量用于孵化和防御
             const isCrisis = room.memory.energyState === "CRISIS";
             if (!isCrisis &&
                 tower.store.getUsedCapacity(RESOURCE_ENERGY) >
                     tower.store.getCapacity(RESOURCE_ENERGY) * 0.5) {
-                // 优先修路和容器 (损耗 > 20% 才修，避免频繁切换)
+                // 4.1 优先修路和容器
                 const closestDamagedStructure = tower.pos.findClosestByRange(FIND_STRUCTURES, {
                     filter: (structure) => {
                         return ((structure.structureType === STRUCTURE_ROAD ||
@@ -1596,15 +1618,21 @@ const towerModule = {
                     tower.repair(closestDamagedStructure);
                     return;
                 }
-                // 其次修墙 (Rampart/Wall) - 只修到 10k 血，避免耗光能量
-                // const closestDamagedWall = ...
-            }
-            // 3. 治疗受伤的己方 Creep
-            const closestDamagedCreep = tower.pos.findClosestByRange(FIND_MY_CREEPS, {
-                filter: (creep) => creep.hits < creep.hitsMax,
-            });
-            if (closestDamagedCreep) {
-                tower.heal(closestDamagedCreep);
+                // 4.2 其次修墙 (Rampart/Wall) - 逐步加固到安全线 (比如 50k)
+                // 只有能量很充裕 (>70%) 才干这个
+                if (tower.store.getUsedCapacity(RESOURCE_ENERGY) >
+                    tower.store.getCapacity(RESOURCE_ENERGY) * 0.7) {
+                    const wallTarget = 50000; // 目标血量
+                    const wallToRepair = tower.pos.findClosestByRange(FIND_STRUCTURES, {
+                        filter: (s) => (s.structureType === STRUCTURE_RAMPART ||
+                            s.structureType === STRUCTURE_WALL) &&
+                            s.hits < wallTarget,
+                    });
+                    if (wallToRepair) {
+                        tower.repair(wallToRepair);
+                        return;
+                    }
+                }
             }
         });
     },
@@ -2005,6 +2033,50 @@ const monitorModule = {
                 creep.memory.idleTicks = 0;
             }
         });
+        // 5. Dispatch System Visualization (New)
+        const dispatch = Memory.dispatch;
+        if (dispatch) {
+            row += 1.0;
+            visual.text(`📡 调度中心:`, x, row, { align: "left", font: 0.7, color: "#ffffff" });
+            row += 0.8;
+            // Count tasks
+            let taskCount = 0;
+            for (const id in dispatch.tasks) {
+                taskCount++;
+            }
+            // Count active assignments
+            let assignCount = 0;
+            for (const id in dispatch.assignments) {
+                assignCount++;
+            }
+            visual.text(`Tasks: ${taskCount} | Assigned: ${assignCount}`, x, row, {
+                align: "left", font: 0.5, color: "#aaaaaa"
+            });
+            // Draw Task Lines
+            for (const creepId in dispatch.assignments) {
+                const creep = Game.creeps[creepId];
+                if (!creep || creep.room.name !== room.name)
+                    continue;
+                const taskId = dispatch.assignments[creepId];
+                const task = dispatch.tasks[taskId];
+                if (task && task.pos) {
+                    // Determine color based on priority
+                    let color = "#ffffff";
+                    if (task.priority === 0)
+                        color = "#ff0000"; // Critical
+                    else if (task.priority === 1)
+                        color = "#ff00ff"; // High
+                    else if (task.priority === 2)
+                        color = "#00ff00"; // Normal
+                    visual.line(creep.pos, new RoomPosition(task.pos.x, task.pos.y, task.pos.roomName), {
+                        color: color, width: 0.1, lineStyle: "dotted", opacity: 0.5
+                    });
+                    visual.circle(new RoomPosition(task.pos.x, task.pos.y, task.pos.roomName), {
+                        fill: "transparent", radius: 0.3, stroke: color, opacity: 0.5
+                    });
+                }
+            }
+        }
     },
 };
 
@@ -2713,6 +2785,148 @@ const moveModule = {
     },
 };
 
+// Priority Levels
+var TaskPriority;
+(function (TaskPriority) {
+    TaskPriority[TaskPriority["CRITICAL"] = 0] = "CRITICAL";
+    TaskPriority[TaskPriority["HIGH"] = 1] = "HIGH";
+    TaskPriority[TaskPriority["NORMAL"] = 2] = "NORMAL";
+    TaskPriority[TaskPriority["LOW"] = 3] = "LOW";
+    TaskPriority[TaskPriority["IDLE"] = 4] = "IDLE"; // Scouting, signing controller
+})(TaskPriority || (TaskPriority = {}));
+
+class GlobalDispatch {
+    static init() {
+        if (!Memory.dispatch) {
+            Memory.dispatch = {
+                tasks: {},
+                assignments: {},
+                queues: {
+                    [TaskPriority.CRITICAL]: [],
+                    [TaskPriority.HIGH]: [],
+                    [TaskPriority.NORMAL]: [],
+                    [TaskPriority.LOW]: [],
+                    [TaskPriority.IDLE]: []
+                }
+            };
+        }
+    }
+    static run(room) {
+        this.init();
+        // 1. Cleanup invalid tasks/assignments
+        this.cleanup();
+        // 2. Match tasks to idle creeps
+        this.dispatch(room);
+    }
+    static registerTask(task) {
+        this.init();
+        if (Memory.dispatch.tasks[task.id])
+            return; // Already exists
+        Memory.dispatch.tasks[task.id] = task;
+        Memory.dispatch.queues[task.priority].push(task.id);
+    }
+    static getTask(taskId) {
+        var _a;
+        return (_a = Memory.dispatch) === null || _a === void 0 ? void 0 : _a.tasks[taskId];
+    }
+    static getAssignedTask(creep) {
+        var _a;
+        const taskId = (_a = Memory.dispatch) === null || _a === void 0 ? void 0 : _a.assignments[creep.id];
+        if (!taskId)
+            return undefined;
+        return this.getTask(taskId);
+    }
+    static completeTask(taskId, creepId) {
+        // Remove assignment
+        if (Memory.dispatch.assignments[creepId] === taskId) {
+            delete Memory.dispatch.assignments[creepId];
+        }
+        // Logic to remove task if fully completed?
+        // For now, assume tasks are one-off or managed by Centers.
+        // Ideally, Center checks if task is done.
+        // Here we just unassign.
+    }
+    static cleanup() {
+        // Remove dead creeps from assignments
+        for (const creepId in Memory.dispatch.assignments) {
+            if (!Game.creeps[creepId]) {
+                delete Memory.dispatch.assignments[creepId];
+            }
+        }
+        // Remove tasks that have expired (optional)
+    }
+    static dispatch(room) {
+        // Find idle creeps in this room
+        const idleCreeps = room.find(FIND_MY_CREEPS, {
+            filter: (c) => !Memory.dispatch.assignments[c.id] && !c.spawning
+        });
+        if (idleCreeps.length === 0)
+            return;
+        // Iterate priorities
+        const priorities = [
+            TaskPriority.CRITICAL,
+            TaskPriority.HIGH,
+            TaskPriority.NORMAL,
+            TaskPriority.LOW,
+            TaskPriority.IDLE
+        ];
+        for (const priority of priorities) {
+            const queue = Memory.dispatch.queues[priority];
+            if (queue.length === 0)
+                continue;
+            // Try to assign tasks in this queue
+            // Simple FIFO for now, optimize with "Best Match" later
+            for (let i = 0; i < queue.length; i++) {
+                const taskId = queue[i];
+                const task = Memory.dispatch.tasks[taskId];
+                if (!task) {
+                    queue.splice(i, 1);
+                    i--;
+                    continue;
+                }
+                // Check if task needs more creeps
+                if (task.creepsAssigned.length >= task.maxCreeps)
+                    continue;
+                // Find best creep
+                const bestCreep = this.findBestCreep(idleCreeps, task);
+                if (bestCreep) {
+                    // Assign
+                    Memory.dispatch.assignments[bestCreep.id] = task.id;
+                    task.creepsAssigned.push(bestCreep.id);
+                    // Remove from idle list
+                    const index = idleCreeps.indexOf(bestCreep);
+                    idleCreeps.splice(index, 1);
+                    if (idleCreeps.length === 0)
+                        return;
+                }
+            }
+        }
+    }
+    static findBestCreep(creeps, task) {
+        // Filter by capability
+        const candidates = creeps.filter(c => {
+            var _a, _b;
+            // 1. Check Body Requirements
+            if ((_a = task.requirements) === null || _a === void 0 ? void 0 : _a.bodyParts) {
+                const hasParts = task.requirements.bodyParts.every(part => c.getActiveBodyparts(part) > 0);
+                if (!hasParts)
+                    return false;
+            }
+            // 2. Check Capacity
+            if ((_b = task.requirements) === null || _b === void 0 ? void 0 : _b.minCapacity) {
+                if (c.store.getCapacity() < task.requirements.minCapacity)
+                    return false;
+            }
+            return true;
+        });
+        if (candidates.length === 0)
+            return null;
+        // Sort by distance (simple optimization)
+        // In a real system, we'd cache paths or use Manhattan distance
+        return task.pos ? candidates.sort((a, b) => a.pos.getRangeTo(task.pos) - b.pos.getRangeTo(task.pos))[0] : candidates[0];
+    }
+}
+
 /**
  * @typedef {Object} Task
  * @property {string} id - Unique task ID
@@ -2736,13 +2950,94 @@ class Role {
         if (this.creep.spawning)
             return;
         try {
-            // 1. Check state transitions
+            // 0. Check for Dispatched Task
+            const task = GlobalDispatch.getAssignedTask(this.creep);
+            if (task) {
+                this.runTask(task);
+                return;
+            }
+            // 1. Check state transitions (Legacy)
             this.checkState();
-            // 2. Execute current state logic
+            // 2. Execute current state logic (Legacy)
             this.executeState();
         }
         catch (e) {
             console.log(`[Role] Error in ${this.creep.name}: ${e.stack}`);
+        }
+    }
+    /**
+     * Execute assigned task
+     */
+    runTask(task) {
+        var _a, _b;
+        const target = Game.getObjectById(task.targetId);
+        // Validation
+        if (!target && !task.pos) {
+            console.log(`[Role] Task ${task.id} invalid target`);
+            GlobalDispatch.completeTask(task.id, this.creep.id); // Abort
+            return;
+        }
+        const pos = target ? target.pos : task.pos;
+        // Movement
+        if (!this.creep.pos.inRangeTo(pos, task.type === 'HARVEST' || task.type === 'ATTACK' ? 1 : 3)) {
+            this.move(pos);
+            // Continue to try action if in range (e.g. range 3 for build/repair/upgrade)
+        }
+        // Action Execution
+        let result = OK;
+        switch (task.type) {
+            case 'HARVEST':
+                if (target instanceof Source || target instanceof Mineral) {
+                    result = this.creep.harvest(target);
+                }
+                break;
+            case 'TRANSFER':
+                if (target instanceof Structure || target instanceof Creep) {
+                    result = this.creep.transfer(target, ((_a = task.data) === null || _a === void 0 ? void 0 : _a.resource) || RESOURCE_ENERGY);
+                }
+                break;
+            case 'PICKUP':
+                if (target instanceof Resource) {
+                    result = this.creep.pickup(target);
+                }
+                else if (target instanceof Structure) { // Withdraw from container
+                    result = this.creep.withdraw(target, ((_b = task.data) === null || _b === void 0 ? void 0 : _b.resource) || RESOURCE_ENERGY);
+                }
+                break;
+            case 'BUILD':
+                if (target instanceof ConstructionSite) {
+                    result = this.creep.build(target);
+                }
+                break;
+            case 'REPAIR':
+                if (target instanceof Structure) {
+                    result = this.creep.repair(target);
+                }
+                break;
+            case 'UPGRADE':
+                if (target instanceof StructureController) {
+                    result = this.creep.upgradeController(target);
+                }
+                break;
+            case 'ATTACK':
+                if (target instanceof Creep || target instanceof Structure) {
+                    result = this.creep.attack(target);
+                }
+                break;
+            case 'HEAL':
+                if (target instanceof Creep) {
+                    result = this.creep.heal(target);
+                }
+                break;
+        }
+        if (result === ERR_NOT_IN_RANGE) {
+            this.move(pos);
+        }
+        else if (result !== OK && result !== ERR_TIRED) {
+            // Log error or finish task if done
+            if (result === ERR_FULL || result === ERR_NOT_ENOUGH_RESOURCES || result === ERR_INVALID_TARGET) {
+                GlobalDispatch.completeTask(task.id, this.creep.id);
+            }
         }
     }
     /**
@@ -3384,9 +3679,15 @@ class Builder extends Role {
         }
         if (this.memory.working) {
             // === WORK ===
-            // 1. Critical Repairs (Hits < 10%)
+            // 1. Critical Repairs (Hits < 10% for non-walls, or < 1000 for walls/ramparts)
             const critical = this.creep.pos.findClosestByPath(FIND_STRUCTURES, {
-                filter: (s) => s.hits < s.hitsMax * 0.1 && s.structureType !== STRUCTURE_WALL,
+                filter: (s) => {
+                    if (s.structureType === STRUCTURE_WALL ||
+                        s.structureType === STRUCTURE_RAMPART) {
+                        return s.hits < 1000;
+                    }
+                    return s.hits < s.hitsMax * 0.1;
+                },
             });
             if (critical) {
                 if (this.creep.repair(critical) === ERR_NOT_IN_RANGE) {
@@ -3416,7 +3717,24 @@ class Builder extends Role {
                 }
                 return;
             }
-            // 4. Nothing to do? Upgrade
+            // 4. Wall Fortification (Up to 50k)
+            // Only do this if we have decent energy in the room to avoid stalling upgrade completely
+            // But builder usually spawns when there is construction. If no construction,
+            // it falls through here.
+            const wallToFortify = this.creep.pos.findClosestByPath(FIND_STRUCTURES, {
+                filter: (s) => (s.structureType === STRUCTURE_WALL ||
+                    s.structureType === STRUCTURE_RAMPART) &&
+                    s.hits < 50000,
+            });
+            if (wallToFortify) {
+                if (this.creep.repair(wallToFortify) === ERR_NOT_IN_RANGE) {
+                    this.move(wallToFortify, {
+                        visualizePathStyle: { stroke: "#0000ff" },
+                    });
+                }
+                return;
+            }
+            // 5. Nothing to do? Upgrade
             if (this.creep.upgradeController(this.creep.room.controller) === ERR_NOT_IN_RANGE) {
                 this.move(this.creep.room.controller);
             }
@@ -3574,9 +3892,246 @@ const brainModule = {
     },
 };
 
+var Strategy;
+(function (Strategy) {
+    Strategy["BOOTSTRAP"] = "BOOTSTRAP";
+    Strategy["GROWTH"] = "GROWTH";
+    Strategy["FORTIFY"] = "FORTIFY";
+    Strategy["WAR"] = "WAR"; // Active combat
+})(Strategy || (Strategy = {}));
+class SupremeCommand {
+    static run(room) {
+        // 1. Determine Strategy
+        const strategy = this.analyzeStrategy(room);
+        // 2. Adjust Memory Flags (Global Dispatch communicates via Memory)
+        if (!room.memory.strategy || room.memory.strategy !== strategy) {
+            room.memory.strategy = strategy;
+            console.log(`[SupremeCommand] Strategy changed to ${strategy} for ${room.name}`);
+        }
+        // 3. Crisis Management
+        this.checkCrisis(room);
+    }
+    static analyzeStrategy(room) {
+        var _a;
+        const rcl = ((_a = room.controller) === null || _a === void 0 ? void 0 : _a.level) || 0;
+        if (rcl < 3)
+            return Strategy.BOOTSTRAP;
+        const hostiles = room.find(FIND_HOSTILE_CREEPS);
+        if (hostiles.length > 0)
+            return Strategy.WAR;
+        // Check if we are under stress
+        if (room.memory.energyLevel === 'CRITICAL')
+            return Strategy.BOOTSTRAP; // Fallback to survival logic
+        return Strategy.GROWTH;
+    }
+    static checkCrisis(room) {
+        // Already handled by populationManager, but we can centralize here later
+        // For now, just monitor
+    }
+}
+
+class EconomyCenter {
+    static run(room) {
+        if (Game.time % 10 !== 0)
+            return; // Run every 10 ticks
+        this.generateHarvestTasks(room);
+        this.generateTransportTasks(room);
+        this.generateBuildTasks(room);
+        this.generateUpgradeTasks(room);
+    }
+    static generateHarvestTasks(room) {
+        const sources = room.find(FIND_SOURCES);
+        sources.forEach(source => {
+            const taskId = `HARVEST_${source.id}`;
+            // Basic task: Harvest energy
+            GlobalDispatch.registerTask({
+                id: taskId,
+                type: 'HARVEST',
+                priority: TaskPriority.NORMAL,
+                targetId: source.id,
+                pos: source.pos,
+                maxCreeps: 1, // Usually 1 per source if static mining
+                creepsAssigned: [], // Managed by Dispatch
+                requirements: {
+                    bodyParts: [WORK]
+                },
+                creationTime: Game.time,
+                data: { resource: RESOURCE_ENERGY }
+            });
+        });
+    }
+    static generateTransportTasks(room) {
+        // 1. From Containers to Spawn/Extension/Storage
+        const containers = room.find(FIND_STRUCTURES, {
+            filter: s => s.structureType === STRUCTURE_CONTAINER && s.store[RESOURCE_ENERGY] > 100
+        });
+        containers.forEach(container => {
+            const taskId = `TRANS_${container.id}`;
+            GlobalDispatch.registerTask({
+                id: taskId,
+                type: 'PICKUP', // Or TRANSFER logic
+                priority: TaskPriority.HIGH,
+                targetId: container.id,
+                pos: container.pos,
+                maxCreeps: 2,
+                creepsAssigned: [],
+                requirements: {
+                    bodyParts: [CARRY],
+                    minCapacity: 50
+                },
+                creationTime: Game.time,
+                data: { resource: RESOURCE_ENERGY }
+            });
+        });
+        // 2. Dropped Resources
+        const dropped = room.find(FIND_DROPPED_RESOURCES, {
+            filter: r => r.resourceType === RESOURCE_ENERGY && r.amount > 100
+        });
+        dropped.forEach(res => {
+            const taskId = `PICKUP_${res.id}`;
+            GlobalDispatch.registerTask({
+                id: taskId,
+                type: 'PICKUP',
+                priority: TaskPriority.HIGH,
+                targetId: res.id,
+                pos: res.pos,
+                maxCreeps: 1,
+                creepsAssigned: [],
+                requirements: {
+                    bodyParts: [CARRY]
+                },
+                creationTime: Game.time,
+                data: { resource: RESOURCE_ENERGY }
+            });
+        });
+    }
+    static generateBuildTasks(room) {
+        const sites = room.find(FIND_MY_CONSTRUCTION_SITES);
+        sites.forEach(site => {
+            const taskId = `BUILD_${site.id}`;
+            // Determine priority based on structure type
+            let priority = TaskPriority.NORMAL;
+            if (site.structureType === STRUCTURE_SPAWN || site.structureType === STRUCTURE_EXTENSION) {
+                priority = TaskPriority.HIGH;
+            }
+            GlobalDispatch.registerTask({
+                id: taskId,
+                type: 'BUILD',
+                priority: priority,
+                targetId: site.id,
+                pos: site.pos,
+                maxCreeps: 3,
+                creepsAssigned: [],
+                requirements: {
+                    bodyParts: [WORK, CARRY]
+                },
+                creationTime: Game.time,
+                data: {}
+            });
+        });
+    }
+    static generateUpgradeTasks(room) {
+        if (!room.controller)
+            return;
+        const taskId = `UPGRADE_${room.name}`;
+        // Always need upgrading
+        GlobalDispatch.registerTask({
+            id: taskId,
+            type: 'UPGRADE',
+            priority: TaskPriority.NORMAL,
+            targetId: room.controller.id,
+            pos: room.controller.pos,
+            maxCreeps: 5, // Configurable
+            creepsAssigned: [],
+            requirements: {
+                bodyParts: [WORK, CARRY]
+            },
+            creationTime: Game.time,
+            data: {}
+        });
+    }
+}
+
+class DefenseCenter {
+    static run(room) {
+        if (Game.time % 5 !== 0)
+            return; // Run frequently
+        this.generateDefenseTasks(room);
+        this.generateRepairTasks(room);
+    }
+    static generateDefenseTasks(room) {
+        const hostiles = room.find(FIND_HOSTILE_CREEPS);
+        if (hostiles.length > 0) {
+            // Create a high priority defense task for each hostile group or leader
+            // Simplification: Target closest hostile
+            const target = hostiles[0];
+            const taskId = `DEFEND_${room.name}_${Game.time}`; // Unique per tick/invasion
+            GlobalDispatch.registerTask({
+                id: taskId,
+                type: 'ATTACK',
+                priority: TaskPriority.CRITICAL,
+                targetId: target.id,
+                pos: target.pos,
+                maxCreeps: 5,
+                creepsAssigned: [],
+                requirements: {
+                    bodyParts: [ATTACK, RANGED_ATTACK]
+                },
+                creationTime: Game.time,
+                data: {}
+            });
+        }
+    }
+    static generateRepairTasks(room) {
+        // 1. Critical Repairs (Walls < 1000, Ramparts < 1000)
+        const critical = room.find(FIND_STRUCTURES, {
+            filter: s => (s.structureType === STRUCTURE_WALL || s.structureType === STRUCTURE_RAMPART) && s.hits < 1000
+        });
+        critical.forEach(s => {
+            GlobalDispatch.registerTask({
+                id: `REPAIR_CRIT_${s.id}`,
+                type: 'REPAIR',
+                priority: TaskPriority.CRITICAL,
+                targetId: s.id,
+                pos: s.pos,
+                maxCreeps: 1,
+                creepsAssigned: [],
+                requirements: { bodyParts: [WORK, CARRY] },
+                creationTime: Game.time,
+                data: {}
+            });
+        });
+        // 2. Maintenance (Roads/Containers < 80%)
+        if (Game.time % 20 === 0) { // Less frequent
+            const maintenance = room.find(FIND_STRUCTURES, {
+                filter: s => (s.structureType === STRUCTURE_ROAD || s.structureType === STRUCTURE_CONTAINER) && s.hits < s.hitsMax * 0.8
+            });
+            maintenance.forEach(s => {
+                GlobalDispatch.registerTask({
+                    id: `REPAIR_${s.id}`,
+                    type: 'REPAIR',
+                    priority: TaskPriority.LOW,
+                    targetId: s.id,
+                    pos: s.pos,
+                    maxCreeps: 1,
+                    creepsAssigned: [],
+                    requirements: { bodyParts: [WORK, CARRY] },
+                    creationTime: Game.time,
+                    data: {}
+                });
+            });
+        }
+    }
+}
+
 // === 注册模块 ===
 // 0. 大脑决策 - 房间级别 (最优先)
 Kernel.register("brain", brainModule);
+Kernel.register("supreme", SupremeCommand); // [NEW] Strategic AI
+// 0.5 调度中心 (任务生成)
+Kernel.register("economy", EconomyCenter); // [NEW]
+Kernel.register("defense", DefenseCenter); // [NEW]
+Kernel.register("dispatch", GlobalDispatch); // [NEW] Task Assignment
 // 1. 核心逻辑 (人口 & 孵化) - 房间级别
 Kernel.register("population", populationModule); // 仅计算
 Kernel.register("lifecycle", Lifecycle); // 生命周期监控
