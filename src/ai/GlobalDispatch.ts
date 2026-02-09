@@ -3,6 +3,7 @@ import {
   Task,
   TaskPriority,
   TaskType,
+  SpawnTask,
 } from "../types/dispatch";
 
 export class GlobalDispatch {
@@ -18,7 +19,11 @@ export class GlobalDispatch {
           [TaskPriority.LOW]: [],
           [TaskPriority.IDLE]: [],
         },
+        spawnQueue: [],
       };
+    }
+    if (!Memory.dispatch.spawnQueue) {
+      Memory.dispatch.spawnQueue = [];
     }
   }
 
@@ -38,6 +43,32 @@ export class GlobalDispatch {
 
     Memory.dispatch.tasks[task.id] = task;
     Memory.dispatch.queues[task.priority].push(task.id);
+  }
+
+  static registerSpawnTask(task: SpawnTask) {
+    this.init();
+    // Check if duplicate request exists? (Optional)
+    // For now, simple push
+    Memory.dispatch.spawnQueue.push(task);
+    // Sort by priority (Ascending because 0 is CRITICAL)
+    Memory.dispatch.spawnQueue.sort((a, b) => a.priority - b.priority);
+  }
+
+  static getNextSpawnTask(roomName: string): SpawnTask | undefined {
+    if (!Memory.dispatch?.spawnQueue) return undefined;
+
+    const queue = Memory.dispatch.spawnQueue;
+    const index = queue.findIndex((t) => t.roomName === roomName);
+
+    if (index >= 0) {
+      const task = queue[index];
+      // Remove from queue immediately?
+      // Or wait for executor to confirm?
+      // For simplicity: remove it now. Executor MUST spawn or re-queue.
+      queue.splice(index, 1);
+      return task;
+    }
+    return undefined;
   }
 
   static getTask(taskId: string): Task | undefined {

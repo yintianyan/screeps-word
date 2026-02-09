@@ -50,11 +50,22 @@ export interface Task {
   data?: any;
 }
 
+export interface SpawnTask {
+  id: string;
+  roomName: string;
+  role: string;
+  priority: TaskPriority;
+  body: BodyPartConstant[];
+  memory: CreepMemory;
+  requestTime: number;
+}
+
 // Dispatch Memory Structure
 export interface DispatchMemory {
   tasks: { [id: string]: Task };
   assignments: { [creepId: string]: string }; // creepId -> taskId
   queues: { [priority in TaskPriority]: string[] }; // priority -> taskIds
+  spawnQueue: SpawnTask[]; // [NEW] Centralized Spawn Queue
 }
 
 // Creep Extension

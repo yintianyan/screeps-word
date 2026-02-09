@@ -13,6 +13,7 @@ import brainModule from "./ai/brainModule";
 import { SupremeCommand } from "./ai/SupremeCommand";
 import { EconomyCenter } from "./centers/EconomyCenter";
 import { DefenseCenter } from "./centers/DefenseCenter";
+import { SpawnCenter } from "./centers/SpawnCenter"; // [NEW]
 import { GlobalDispatch } from "./ai/GlobalDispatch";
 
 // === 注册模块 ===
@@ -24,6 +25,7 @@ Kernel.register("supreme", SupremeCommand); // [NEW] Strategic AI
 // 0.5 调度中心 (任务生成)
 Kernel.register("economy", EconomyCenter); // [NEW]
 Kernel.register("defense", DefenseCenter); // [NEW]
+Kernel.register("spawn_center", SpawnCenter); // [NEW] Spawn Planning
 Kernel.register("dispatch", GlobalDispatch); // [NEW] Task Assignment
 
 // 1. 核心逻辑 (人口 & 孵化) - 房间级别
