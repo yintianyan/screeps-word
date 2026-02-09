@@ -23,6 +23,23 @@ export class GlobalDispatch {
         spawnQueue: [],
       };
     }
+    // [FIX] Ensure all queues exist (Migration for existing memory)
+    if (!Memory.dispatch.queues[TaskPriority.MEDIUM]) {
+      Memory.dispatch.queues[TaskPriority.MEDIUM] = [];
+    }
+    // General safety check for all priorities
+    const priorities = [
+      TaskPriority.CRITICAL,
+      TaskPriority.HIGH,
+      TaskPriority.MEDIUM,
+      TaskPriority.NORMAL,
+      TaskPriority.LOW,
+      TaskPriority.IDLE,
+    ];
+    priorities.forEach((p) => {
+      if (!Memory.dispatch.queues[p]) Memory.dispatch.queues[p] = [];
+    });
+
     if (!Memory.dispatch.spawnQueue) {
       Memory.dispatch.spawnQueue = [];
     }
@@ -124,7 +141,7 @@ export class GlobalDispatch {
     ];
 
     for (const priority of priorities) {
-      const queue = Memory.dispatch.queues[priority];
+      const queue = Memory.dispatch.queues[priority] || [];
       if (queue.length === 0) continue;
 
       // [Optimization] Sort tasks within the same priority!
