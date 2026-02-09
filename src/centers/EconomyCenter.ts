@@ -19,13 +19,93 @@ export class EconomyCenter {
     sources.forEach((source) => {
       const taskId = `HARVEST_${source.id}`;
       // Basic task: Harvest energy
+      // [FIX] Harvester Count Logic
+      // Check if we already have a powerful harvester on this source
+      const existingHarvesters = Cache.getCreepsByRole(
+        room,
+        "harvester",
+      ).filter((c) => c.memory.sourceId === source.id);
+      const totalWorkParts = existingHarvesters.reduce(
+        (sum, c) => sum + c.getActiveBodyparts(WORK),
+        0,
+      );
+
+      // If we have enough work parts (>=5), we only need 1 creep slot.
+      // Otherwise, we might allow more if spots are available (handled by PopulationManager, but task also needs to allow it)
+      // Actually, Task.maxCreeps should match PopulationManager.calculateTargets desired count?
+      // Or simply: Task maxCreeps is the capacity of the task.
+      // If spots > 1, we can have multiple harvesters.
+      // BUT if 1 harvester is enough, we shouldn't assign 2.
+
+      let maxCreeps = 1;
+      // Allow more if total work is low (e.g. < 5) AND spots are available
+      // But we need to check spots again here? Or just trust GlobalDispatch?
+      // GlobalDispatch assigns based on maxCreeps.
+
+      if (totalWorkParts < 5) {
+        // If current work is insufficient, allow more creeps (up to spots)
+        // We can't easily get spots here without recalculating or caching.
+        // Let's assume max 2 for recovery if work is low.
+        // However, if we set maxCreeps=2, Dispatch might assign a second one even if PopulationManager says we only need 1 (because target is met).
+        // Wait, Dispatch only assigns existing creeps.
+        // PopulationManager handles spawning.
+        // So if PopulationManager says "we need 2 harvesters", it spawns 2.
+        // Dispatch needs to allow 2 people to work on the task.
+
+        // So:
+        // 1. If we have 5+ WORK, maxCreeps = 1.
+        // 2. If we have < 5 WORK, maxCreeps = spots (or 2+).
+
+        // Let's use a safe upper bound.
+        // If we restrict maxCreeps to 1, but we spawned 2 small ones, the second one will be idle!
+        // So maxCreeps MUST be >= current population count for this source.
+        maxCreeps = Math.max(1, existingHarvesters.length);
+
+        // Also allow room for a new one if needed?
+        // If existing < target, we need to allow more assignments.
+        // But Dispatch assigns *idle* creeps.
+        // If we spawned a new one, it will be idle.
+        // So maxCreeps should be at least target count.
+
+        // Simplified:
+        // Just set maxCreeps to available spots.
+        // The constraint is in SP-AWNING (PopulationManager).
+        // If we only spawn 1, only 1 will be assigned.
+        // If we spawn 2, 2 will be assigned.
+        // This avoids the "idle harvester" problem.
+
+        // Getting spots count:
+        const terrain = room.getTerrain();
+        let spots = 0;
+        for (let x = -1; x <= 1; x++) {
+          for (let y = -1; y <= 1; y++) {
+            if (x === 0 && y === 0) continue;
+            if (
+              terrain.get(source.pos.x + x, source.pos.y + y) !==
+              TERRAIN_MASK_WALL
+            ) {
+              spots++;
+            }
+          }
+        }
+        maxCreeps = spots;
+      } else {
+        // If we have 5+ WORK, we strictly only want 1 active miner.
+        // But if we are replacing it (Lifecycle), we might have 2 briefly?
+        // Lifecycle replacement creates a new creep. The old one is still working.
+        // We want the new one to take over.
+        // If maxCreeps=1, new one can't assign until old one dies or unassigns.
+        // This is fine. Old one works until death.
+        maxCreeps = 1;
+      }
+
       GlobalDispatch.registerTask({
         id: taskId,
         type: "HARVEST",
         priority: TaskPriority.NORMAL,
         targetId: source.id,
         pos: source.pos,
-        maxCreeps: 1, // Usually 1 per source if static mining
+        maxCreeps: maxCreeps, // Dynamic limit
         creepsAssigned: [], // Managed by Dispatch
         requirements: {
           bodyParts: [WORK],

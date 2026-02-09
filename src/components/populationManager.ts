@@ -155,34 +155,68 @@ const populationModule = {
     // === 1. Harvester: 动态计算 ===
     let harvesterTarget = 0;
     sources.forEach((source) => {
-      const spots = Cache.getHeap(
-        `spots_${source.id}`,
-        () => {
-          let count = 0;
-          const terrain = room.getTerrain();
-          for (let x = -1; x <= 1; x++) {
-            for (let y = -1; y <= 1; y++) {
-              if (x === 0 && y === 0) continue;
-              if (
-                terrain.get(source.pos.x + x, source.pos.y + y) !==
-                TERRAIN_MASK_WALL
-              ) {
-                count++;
-              }
-            }
-          }
-          return count;
-        },
-        1000,
+      // [FIX] Harvester Count Logic
+      // 1. If we have a 5+ WORK harvester (can mine 10 energy/tick), we only need 1 per source.
+      // 2. If we are in CRITICAL/LOW energy, we might need more small ones to ramp up.
+
+      const existingHarvesters = Cache.getCreepsByRole(
+        room,
+        "harvester",
+      ).filter((c) => c.memory.sourceId === source.id);
+      const totalWorkParts = existingHarvesters.reduce(
+        (sum, c) => sum + c.getActiveBodyparts(WORK),
+        0,
       );
+
+      // Check if current harvesting power is sufficient (>= 5 WORK)
+      // Source: 3000 energy / 300 ticks = 10 energy/tick.
+      // 1 WORK = 2 energy/tick. So 5 WORK is max.
+      const isSufficient = totalWorkParts >= 5;
 
       let desired = 1;
 
-      // 如果能量等级是 CRITICAL 或 LOW，且还有空位，允许更多 Harvester 快速恢复
-      const level = this.getEnergyLevel(room);
-      if ((level === "CRITICAL" || level === "LOW") && spots > 1) {
-        // Check if we actually need more (e.g. creep size is small)
-        desired = Math.min(spots, 2);
+      if (!isSufficient) {
+        // If not sufficient, we might need another one if spots allow
+        const spots = Cache.getHeap(
+          `spots_${source.id}`,
+          () => {
+            let count = 0;
+            const terrain = room.getTerrain();
+            for (let x = -1; x <= 1; x++) {
+              for (let y = -1; y <= 1; y++) {
+                if (x === 0 && y === 0) continue;
+                if (
+                  terrain.get(source.pos.x + x, source.pos.y + y) !==
+                  TERRAIN_MASK_WALL
+                ) {
+                  count++;
+                }
+              }
+            }
+            return count;
+          },
+          1000,
+        );
+
+        // In early game (RCL < 3) or if existing harvesters are very small, fill spots
+        // But limit to 2 to avoid congestion unless spots=1
+        if (room.controller && room.controller.level < 3) {
+          desired = Math.min(spots, 2);
+        } else {
+          // RCL 3+: Try to rely on 1 big harvester.
+          // If current is small (< 5 WORK), spawn another to help?
+          // Or just spawn 1 replacement?
+          // SpawnCenter handles replacement. Here we calculate target count.
+          // If we have 1 harvester with 2 WORK, we want 1 target (wait for it to die and replace with better)
+          // UNLESS we are in CRITICAL mode.
+          const level = this.getEnergyLevel(room);
+          if (level === "CRITICAL" || level === "LOW") {
+            desired = Math.min(spots, 2);
+          }
+        }
+      } else {
+        // If sufficient, strictly 1
+        desired = 1;
       }
 
       harvesterTarget += desired;
