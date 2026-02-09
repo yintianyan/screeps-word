@@ -15,6 +15,9 @@ import { EconomyCenter } from "./centers/EconomyCenter";
 import { DefenseCenter } from "./centers/DefenseCenter";
 import { SpawnCenter } from "./centers/SpawnCenter"; // [NEW]
 import { GlobalDispatch } from "./ai/GlobalDispatch";
+import { DataCenter } from "./centers/DataCenter";
+import { RoomCollector } from "./modules/data/RoomCollector";
+import { Dashboard } from "./visuals/Dashboard";
 
 // === 注册模块 ===
 
@@ -26,7 +29,8 @@ Kernel.register("supreme", SupremeCommand); // [NEW] Strategic AI
 Kernel.register("economy", EconomyCenter); // [NEW]
 Kernel.register("defense", DefenseCenter); // [NEW]
 Kernel.register("spawn_center", SpawnCenter); // [NEW] Spawn Planning
-Kernel.register("dispatch", GlobalDispatch); // [NEW] Task Assignment
+Kernel.register("dispatch", GlobalDispatch, "global"); // [NEW] Task Assignment
+Kernel.register("datacenter", DataCenter, "global"); // [NEW] Data Center
 
 // 1. 核心逻辑 (人口 & 孵化) - 房间级别
 Kernel.register("population", populationModule); // 仅计算
@@ -35,6 +39,8 @@ Kernel.register("spawner", spawnerModule); // 孵化执行
 
 // 2. 规划与建造 - 房间级别
 Kernel.register("planner", structurePlanner);
+Kernel.register("collector", RoomCollector); // [NEW] Data Collector
+Kernel.register("dashboard", Dashboard); // [NEW] Visualization
 
 // 3. 防御与监控 - 房间级别
 Kernel.register("tower", towerModule);

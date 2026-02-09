@@ -1,5 +1,4 @@
-
-import { DispatchMemory } from './dispatch';
+import { DispatchMemory } from "./dispatch";
 
 declare global {
   // Memory extension samples
@@ -56,6 +55,7 @@ declare global {
     stats: StatsMemory;
     lifecycle: any; // Add lifecycle
     dispatch: DispatchMemory; // [NEW] Global Dispatch Memory
+    datastore: import("./stats").DataStore; // [NEW] Data Center
     _logFlood: any;
   }
 
