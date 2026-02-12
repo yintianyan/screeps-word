@@ -1,4 +1,3 @@
-import * as _ from "lodash";
 import TrafficManager from "../components/trafficManager";
 
 interface SmartMoveOptions extends MoveToOpts {
@@ -63,7 +62,7 @@ const moveModule = {
 
         // 添加 CostCallback 实现车道偏好
         costCallback: function (roomName: string, costMatrix: CostMatrix) {
-          if (roomName !== creep.room.name) return;
+          if (roomName !== creep.room.name) return costMatrix;
 
           // 1. 基础道路与地形成本 (确保 PathFinder 知道道路的存在)
           // 只有在没有使用 TrafficManager 的静态矩阵时才需要手动设置
@@ -158,7 +157,7 @@ const moveModule = {
           if (obstacle.fatigue === 0) {
             creep.move(creep.pos.getDirectionTo(obstacle));
             // 注意：我们不直接命令对方 move，而是让对方在自己的 smartMove 中响应
-            return;
+            return OK;
           }
         }
       }
@@ -230,16 +229,20 @@ const moveModule = {
       }
 
       if (possiblePos.length > 0) {
-        const best = _.maxBy(possiblePos, (p) => p.score);
+        // const best = _.maxBy(possiblePos, (p) => p.score);
+        const best = possiblePos.reduce(
+          (prev, current) => (prev.score > current.score ? prev : current),
+          possiblePos[0],
+        );
         if (best) {
           // 如果当前位置分值已经很高（不在路上），则原地等待
           const currentIsOnRoad = this.isOnRoad(creep);
           if (!currentIsOnRoad && best.score < 60) {
             creep.say("💤 parking");
-            return;
+            return OK;
           }
           creep.move(creep.pos.getDirectionTo(best.pos));
-          return;
+          return OK;
         }
       }
     }
@@ -409,17 +412,66 @@ const moveModule = {
     if ((creep as any)._moveExecuted) return;
 
     const moveRequest = creep.memory._moveRequest;
-    if (moveRequest && moveRequest.tick === Game.time) {
-      // 检查疲劳值
-      if (creep.fatigue > 0) return;
-
-      const dir = moveRequest.dir;
-      // 反向移动实现对穿
-      const oppositeDir = ((dir + 3) % 8) + 1;
-
-      creep.move(oppositeDir as DirectionConstant);
-      creep.say("🔄 yield");
+    if (moveRequest) {
+      // Simple accept
+      const dir = creep.pos.getDirectionTo(moveRequest.x, moveRequest.y);
+      creep.move(dir);
+      delete creep.memory._moveRequest;
       (creep as any)._moveExecuted = true;
+    }
+  },
+
+  /**
+   * Flee from hostiles to a safe room (Home or Fortress)
+   */
+  flee: function (creep: Creep, homeRoom: string) {
+    // 1. Find enemies to avoid
+    const hostiles = creep.room.find(FIND_HOSTILE_CREEPS);
+    const goals = hostiles.map((h) => ({ pos: h.pos, range: 10 }));
+
+    // 2. Determine Safe Destination
+    // If we are in danger room, move to exit towards home
+    if (creep.room.name !== homeRoom) {
+      const route = Game.map.findRoute(creep.room, homeRoom);
+      if (route && route !== ERR_NO_PATH && route.length > 0) {
+        const exit = creep.pos.findClosestByRange(route[0].exit);
+        if (exit) {
+          creep.moveTo(exit, {
+            visualizePathStyle: { stroke: "#ff0000", lineStyle: "dashed" },
+            reusePath: 5,
+          });
+          creep.say("🏃💨 flee");
+          return;
+        }
+      }
+    }
+
+    // 3. If in home room or no path, PathFinder.search to run away from enemies
+    const ret = PathFinder.search(creep.pos, goals, {
+      flee: true,
+      roomCallback: (roomName) => {
+        const room = Game.rooms[roomName];
+        if (!room) return false;
+        const costs = new PathFinder.CostMatrix();
+        room.find(FIND_STRUCTURES).forEach(function (struct) {
+          if (struct.structureType === STRUCTURE_ROAD) {
+            // Favor roads
+            costs.set(struct.pos.x, struct.pos.y, 1);
+          } else if (
+            struct.structureType !== STRUCTURE_CONTAINER &&
+            (struct.structureType !== STRUCTURE_RAMPART || !struct.my)
+          ) {
+            // Can't walk through non-walkable buildings
+            costs.set(struct.pos.x, struct.pos.y, 0xff);
+          }
+        });
+        return costs;
+      },
+    });
+
+    if (ret.path.length > 0) {
+      creep.move(creep.pos.getDirectionTo(ret.path[0]));
+      creep.say("😱 panic");
     }
   },
 };

@@ -1,3 +1,5 @@
+import { EnergyManager, CrisisLevel } from "../../components/EnergyManager";
+
 const towerModule = {
   run: function (room) {
     // 查找房间内的所有塔
@@ -36,7 +38,9 @@ const towerModule = {
 
       // 4. 常规维修 (只有能量充足时才修，保留 50% 能量防守)
       // 在危机模式下，彻底禁止维修，节省每一滴能量用于孵化和防御
-      const isCrisis = room.memory.energyState === "CRISIS";
+      const level = EnergyManager.getLevel(room);
+      const isCrisis = level >= CrisisLevel.HIGH; // HIGH or CRITICAL
+
       if (
         !isCrisis &&
         tower.store.getUsedCapacity(RESOURCE_ENERGY) >

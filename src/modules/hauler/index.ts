@@ -14,14 +14,14 @@ export default class Hauler extends Role {
     // [FIX] Don't wait for 100% full. If we have > 90% or plenty of energy (e.g. > 400), go deliver.
     // Especially if capacity is large.
     if (!this.memory.working) {
-        const free = this.creep.store.getFreeCapacity();
-        const used = this.creep.store.getUsedCapacity();
-        // If full or mostly full (free < 50 which is 1 part)
-        // Or if we have a decent load (> 400) and no nearby pile?
-        if (free === 0 || (free < 50 && used > 0)) {
-            this.memory.working = true;
-            this.creep.say("🚚 deliver");
-        }
+      const free = this.creep.store.getFreeCapacity();
+      const used = this.creep.store.getUsedCapacity();
+      // If full or mostly full (free < 50 which is 1 part)
+      // Or if we have a decent load (> 400) and no nearby pile?
+      if (free === 0 || (free < 50 && used > 0)) {
+        this.memory.working = true;
+        this.creep.say("🚚 deliver");
+      }
     }
 
     // Opportunistic Pickup: If moving to collect/deliver and see dropped energy on/near position
@@ -29,31 +29,41 @@ export default class Hauler extends Role {
     if (dropped && dropped.resourceType === RESOURCE_ENERGY) {
       this.creep.pickup(dropped);
     }
+    const tombstone = this.creep.pos.lookFor(LOOK_TOMBSTONES)[0];
+    if (tombstone && tombstone.store[RESOURCE_ENERGY] > 0) {
+      this.creep.withdraw(tombstone, RESOURCE_ENERGY);
+    }
+    const ruin = this.creep.pos.lookFor(LOOK_RUINS)[0];
+    if (ruin && ruin.store[RESOURCE_ENERGY] > 0) {
+      this.creep.withdraw(ruin, RESOURCE_ENERGY);
+    }
   }
 
   // Helper for opportunistic transfer
   private checkOpportunisticTransfer() {
-     // Only if we have energy
-     if (this.creep.store[RESOURCE_ENERGY] > 0) {
-         const neighbors = this.creep.pos.findInRange(FIND_MY_CREEPS, 1);
-         for (const neighbor of neighbors) {
-             if (neighbor.id === this.creep.id) continue;
-             // Only feed Upgraders/Builders who need energy
-             if ((neighbor.memory.role === 'upgrader' || neighbor.memory.role === 'builder') && 
-                 neighbor.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
-                 
-                 this.creep.transfer(neighbor, RESOURCE_ENERGY);
-                 this.creep.say("🤝 pass");
-                 break; // One transfer per tick
-             }
-         }
-     }
+    // Only if we have energy
+    if (this.creep.store[RESOURCE_ENERGY] > 0) {
+      const neighbors = this.creep.pos.findInRange(FIND_MY_CREEPS, 1);
+      for (const neighbor of neighbors) {
+        if (neighbor.id === this.creep.id) continue;
+        // Only feed Upgraders/Builders who need energy
+        if (
+          (neighbor.memory.role === "upgrader" ||
+            neighbor.memory.role === "builder") &&
+          neighbor.store.getFreeCapacity(RESOURCE_ENERGY) > 0
+        ) {
+          this.creep.transfer(neighbor, RESOURCE_ENERGY);
+          this.creep.say("🤝 pass");
+          break; // One transfer per tick
+        }
+      }
+    }
   }
 
   // Override move to include opportunistic transfer during task execution
   move(target: RoomPosition | { pos: RoomPosition } | Structure, opts = {}) {
-      this.checkOpportunisticTransfer();
-      return super.move(target, opts);
+    this.checkOpportunisticTransfer();
+    return super.move(target, opts);
   }
 
   executeState() {
@@ -252,10 +262,10 @@ export default class Hauler extends Role {
 
         if (bestCandidate) {
           const target = bestCandidate.candidate.target;
-          
+
           // [NEW] Announce target so others know I'm coming
           this.memory.targetId = target.id;
-          
+
           if (
             this.creep.transfer(target, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE
           ) {
@@ -266,8 +276,65 @@ export default class Hauler extends Role {
           return;
         }
       }
+
+      // Fallback: Dump to Upgrader if no other target
+      if (candidates.length === 0) {
+        const upgrader = this.creep.room.find(FIND_MY_CREEPS, {
+          filter: (c) =>
+            c.memory.role === "upgrader" &&
+            c.store.getFreeCapacity(RESOURCE_ENERGY) > 0,
+        })[0];
+        if (upgrader) {
+          if (
+            this.creep.transfer(upgrader, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE
+          ) {
+            this.move(upgrader);
+          }
+        }
+      }
     } else {
       // === COLLECT STATE ===
+      // 0. Receiver Link (Near Storage)
+      if (this.creep.room.storage) {
+        const link = this.creep.room.storage.pos.findInRange(
+          FIND_STRUCTURES,
+          2,
+          {
+            filter: (s) =>
+              s.structureType === STRUCTURE_LINK &&
+              s.store[RESOURCE_ENERGY] > 0,
+          },
+        )[0];
+        if (link) {
+          if (this.creep.withdraw(link, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
+            this.move(link);
+          }
+          return;
+        }
+      }
+
+      // 0.5 Tombstones & Ruins
+      const tombstone = this.creep.pos.findClosestByPath(FIND_TOMBSTONES, {
+        filter: (t) => t.store[RESOURCE_ENERGY] > 50,
+      });
+      if (tombstone) {
+        if (
+          this.creep.withdraw(tombstone, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE
+        ) {
+          this.move(tombstone);
+        }
+        return;
+      }
+      const ruin = this.creep.pos.findClosestByPath(FIND_RUINS, {
+        filter: (r) => r.store[RESOURCE_ENERGY] > 50,
+      });
+      if (ruin) {
+        if (this.creep.withdraw(ruin, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
+          this.move(ruin);
+        }
+        return;
+      }
+
       // 1. Dropped Resources
       const dropped = this.creep.pos.findClosestByPath(FIND_DROPPED_RESOURCES, {
         filter: (r) => r.resourceType === RESOURCE_ENERGY && r.amount > 50,

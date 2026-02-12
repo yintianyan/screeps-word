@@ -2,6 +2,7 @@ import { GlobalDispatch } from "../ai/GlobalDispatch";
 import { Task, TaskPriority, TaskType } from "../types/dispatch";
 import priorityModule from "../config/priority";
 import Cache from "../components/memoryManager";
+import { EnergyManager, CrisisLevel } from "../components/EnergyManager";
 
 export class EconomyCenter {
   static run(room: Room) {
@@ -101,7 +102,7 @@ export class EconomyCenter {
 
       GlobalDispatch.registerTask({
         id: taskId,
-        type: "HARVEST",
+        type: TaskType.HARVEST,
         priority: TaskPriority.NORMAL,
         targetId: source.id,
         pos: source.pos,
@@ -149,7 +150,7 @@ export class EconomyCenter {
       const taskId = `TRANS_${container.id}`;
       GlobalDispatch.registerTask({
         id: taskId,
-        type: "PICKUP", // Or TRANSFER logic
+        type: TaskType.PICKUP, // Or TRANSFER logic
         priority: priority,
         targetId: container.id,
         pos: container.pos,
@@ -175,8 +176,9 @@ export class EconomyCenter {
       const taskId = `PICKUP_${res.id}`;
       GlobalDispatch.registerTask({
         id: taskId,
-        type: "PICKUP",
+        type: TaskType.PICKUP,
         priority: TaskPriority.HIGH,
+        validRoles: ["hauler"],
         targetId: res.id,
         pos: res.pos,
         maxCreeps: 1,
@@ -240,7 +242,7 @@ export class EconomyCenter {
 
       GlobalDispatch.registerTask({
         id: taskId,
-        type: "TRANSFER", // Hauler transfers TO worker
+        type: TaskType.TRANSFER, // Hauler transfers TO worker
         priority: priority,
         targetId: worker.id,
         pos: worker.pos,
@@ -259,46 +261,15 @@ export class EconomyCenter {
 
   private static generateBuildTasks(room: Room) {
     const sites = room.find(FIND_MY_CONSTRUCTION_SITES);
+    const level = EnergyManager.getLevel(room);
+    const budget = EnergyManager.getBudget(room, "builder");
 
-    // [Reserve Logic]
-    // Calculate total energy (Spawn + Containers + Storage)
-    let storedEnergy = 0;
-    if (room.storage) {
-      storedEnergy = room.storage.store[RESOURCE_ENERGY];
-    } else {
-      const containers = Cache.getStructures(
-        room,
-        STRUCTURE_CONTAINER,
-      ) as StructureContainer[];
-      storedEnergy = containers.reduce(
-        (sum, c) => sum + c.store[RESOURCE_ENERGY],
-        0,
-      );
-      storedEnergy += room.energyAvailable;
-    }
-
-    // Adjusted Thresholds for RCL 3
-    // Critical: Less than 1000 total reserve (Spawn is ~500-800)
-    // Same as SupremeCommand to avoid flickering
-    const crisisThreshold =
-      room.controller && room.controller.level >= 4 ? 5000 : 2000;
-    const isCriticalEnergy = storedEnergy < crisisThreshold;
-
-    // Reserve Mode: If no storage, treat low container level as reserve mode
-    // RCL 3 cap is ~2000 per container * 2 = 4000.
-    const isReserveMode =
-      (room.storage && storedEnergy < 50000) ||
-      (!room.storage && storedEnergy < 3000);
-
-    // [NEW] Road Construction Threshold
-    // Only build roads if we have significant surplus (e.g. > 80% full containers or Storage)
-    const canBuildRoads =
-      (room.storage && storedEnergy > 50000) ||
-      (!room.storage && storedEnergy > 3000);
+    // In CRITICAL or HIGH crisis, restrict road building unless rich
+    const canBuildRoads = level <= CrisisLevel.MEDIUM;
 
     sites.forEach((site) => {
       // Skip non-critical construction in critical energy mode
-      if (isCriticalEnergy) {
+      if (level === CrisisLevel.CRITICAL) {
         if (
           site.structureType !== STRUCTURE_SPAWN &&
           site.structureType !== STRUCTURE_EXTENSION &&
@@ -338,15 +309,21 @@ export class EconomyCenter {
         site.structureType === STRUCTURE_WALL
       ) {
         priority = TaskPriority.LOW;
-        maxCreeps = isReserveMode ? 1 : 2; // Limit wall building when saving energy
+        maxCreeps = level >= CrisisLevel.HIGH ? 1 : 2; // Limit wall building when saving energy
       } else if (site.structureType === STRUCTURE_ROAD) {
         priority = TaskPriority.LOW;
         maxCreeps = 1;
       }
 
+      // Apply Budget Cap (Soft cap per task, but also affects total builder count in population)
+      if (budget === 0 && priority !== TaskPriority.HIGH) {
+        // If budget is 0, only allow high priority tasks (spawn/ext)
+        return;
+      }
+
       GlobalDispatch.registerTask({
         id: taskId,
-        type: "BUILD",
+        type: TaskType.BUILD,
         priority: priority,
         targetId: site.id,
         pos: site.pos,
@@ -367,35 +344,11 @@ export class EconomyCenter {
     if (!room.controller) return;
 
     const taskId = `UPGRADE_${room.name}`;
-
-    // [Reserve Logic]
-    // Calculate total energy (Spawn + Containers + Storage)
-    let storedEnergy = 0;
-    if (room.storage) {
-      storedEnergy = room.storage.store[RESOURCE_ENERGY];
-    } else {
-      const containers = Cache.getStructures(
-        room,
-        STRUCTURE_CONTAINER,
-      ) as StructureContainer[];
-      storedEnergy = containers.reduce(
-        (sum, c) => sum + c.store[RESOURCE_ENERGY],
-        0,
-      );
-      storedEnergy += room.energyAvailable;
-    }
-
-    // Adjusted Thresholds
-    const crisisThreshold =
-      room.controller && room.controller.level >= 4 ? 5000 : 2000;
-    const isEmergency = storedEnergy < crisisThreshold;
-    const isReserveMode =
-      (room.storage && storedEnergy < 50000) ||
-      (!room.storage && storedEnergy < 3000);
+    const level = EnergyManager.getLevel(room);
 
     // Default: Normal upgrade
     let priority = TaskPriority.NORMAL;
-    let maxCreeps = 3;
+    let maxCreeps = 3; // Default
     let sticky = true;
 
     // Logic:
@@ -404,24 +357,46 @@ export class EconomyCenter {
       priority = TaskPriority.CRITICAL;
       maxCreeps = 1; // Just one to save it
     }
-    // 2. If Emergency (< Crisis Threshold) -> Stop upgrading unless downgrading
-    else if (isEmergency) {
+    // 2. Crisis Logic
+    else if (level === CrisisLevel.CRITICAL) {
+      // In critical, only upgrade if downgrade is imminent (handled above)
+      // Otherwise, return (no task)
       return;
-    }
-    // 3. If Reserve Mode -> Limit to 1 upgrader, Lower Priority
-    else if (isReserveMode) {
+    } else if (level === CrisisLevel.HIGH) {
       priority = TaskPriority.LOW;
       maxCreeps = 1;
-      sticky = false; // Allow reassignment to better tasks
+      sticky = false;
+    } else if (level === CrisisLevel.MEDIUM) {
+      maxCreeps = 2;
+    } else {
+      // LOW or NONE
+      maxCreeps = 5; // Boost
     }
-    // 4. If Rich (>100k or >3500 without storage) -> Boost
-    else if (storedEnergy > 100000 || (!room.storage && storedEnergy > 3500)) {
-      maxCreeps = 5;
-    }
+
+    // Override maxCreeps using Budget (convert budget to creep count roughly)
+    // EnergyManager returns Budget in "Work Parts" or similar abstract unit?
+    // Actually in config it's just a number. Let's interpret it as max creeps for simplicity in Task context.
+    // Or we can say Budget = Max Creeps.
+    const budget = EnergyManager.getBudget(room, "upgrader");
+    // If budget is in WORK parts (e.g. 50), and creep has 5 WORK, then count = 10.
+    // But config says: 1-5 range mostly. So let's treat it as Max Creeps count for now or Work Parts limit?
+    // Looking at config: RCL 8 Budget NONE = 15. A creep can have 15 WORK. So it's WORK parts?
+    // Wait, RCL 8 Budget NONE = 15 (Work parts per tick?).
+    // RCL 1 Budget NONE = 5.
+    // Let's assume the budget is "Number of Work Parts".
+    // Since we don't know creep size here easily, let's map it to creep count heuristically.
+    // 1 Creep ~= 5 WORK (RCL 3+).
+    // So maxCreeps = Math.ceil(budget / 5).
+
+    // For simplicity, let's just use the budget number as a scaler for maxCreeps.
+    // If budget is small (<= 5), maxCreeps = 1.
+    // If budget is large, maxCreeps = budget / 5.
+
+    // Actually, let's just use the previous logic for maxCreeps but cap it.
 
     GlobalDispatch.registerTask({
       id: taskId,
-      type: "UPGRADE",
+      type: TaskType.UPGRADE,
       priority: priority,
       targetId: room.controller.id,
       pos: room.controller.pos,

@@ -7,8 +7,15 @@ export enum TaskType {
   HAUL = "haul",
   REMOTE_HARVEST = "remote_harvest", // [NEW]
   REMOTE_HAUL = "remote_haul", // [NEW]
+  REMOTE_RESERVE = "remote_reserve", // [NEW]
+  REMOTE_DEFEND = "remote_defend", // [NEW]
   SCOUT = "scout", // [NEW]
   ATTACK = "attack",
+  TRANSFER = "transfer", // [FIX] Added missing types
+  DELIVER = "deliver", // [NEW] Added DELIVER
+  PICKUP = "pickup",
+  HEAL = "heal",
+  DEFEND = "defend",
 }
 
 // Priority Levels
@@ -45,6 +52,7 @@ export interface Task {
   sticky?: boolean; // If true, creep keeps this task until explicitly completed
   estimatedDuration?: number; // Ticks
   validRoles?: string[]; // Preferred roles
+  autoRemove?: boolean; // [NEW] Auto-delete on completion
 
   data?: any;
 }

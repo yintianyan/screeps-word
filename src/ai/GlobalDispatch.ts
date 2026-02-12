@@ -24,21 +24,25 @@ export class GlobalDispatch {
       };
     }
     // [FIX] Ensure all queues exist (Migration for existing memory)
-    if (!Memory.dispatch.queues[TaskPriority.MEDIUM]) {
-      Memory.dispatch.queues[TaskPriority.MEDIUM] = [];
+    if (Memory.dispatch && Memory.dispatch.queues) {
+      if (!Memory.dispatch.queues[TaskPriority.MEDIUM]) {
+        Memory.dispatch.queues[TaskPriority.MEDIUM] = [];
+      }
     }
     // General safety check for all priorities
-    const priorities = [
-      TaskPriority.CRITICAL,
-      TaskPriority.HIGH,
-      TaskPriority.MEDIUM,
-      TaskPriority.NORMAL,
-      TaskPriority.LOW,
-      TaskPriority.IDLE,
-    ];
-    priorities.forEach((p) => {
-      if (!Memory.dispatch.queues[p]) Memory.dispatch.queues[p] = [];
-    });
+    if (Memory.dispatch && Memory.dispatch.queues) {
+      const priorities = [
+        TaskPriority.CRITICAL,
+        TaskPriority.HIGH,
+        TaskPriority.MEDIUM,
+        TaskPriority.NORMAL,
+        TaskPriority.LOW,
+        TaskPriority.IDLE,
+      ];
+      priorities.forEach((p) => {
+        if (!Memory.dispatch.queues[p]) Memory.dispatch.queues[p] = [];
+      });
+    }
 
     if (!Memory.dispatch.spawnQueue) {
       Memory.dispatch.spawnQueue = [];
@@ -46,19 +50,29 @@ export class GlobalDispatch {
   }
 
   static run(room: Room) {
-    this.init();
+    try {
+      this.init();
 
-    // 1. Cleanup invalid tasks/assignments
-    this.cleanup();
+      // 1. Cleanup invalid tasks/assignments
+      this.cleanup();
 
-    // 2. Match tasks to idle creeps
-    this.dispatch(room);
+      // 2. Match tasks to idle creeps
+      this.dispatch(room);
+    } catch (error) {
+      console.log(
+        `Error in GlobalDispatch.run for room ${room.name}: ${error}`,
+      );
+      if (error instanceof Error && error.stack) {
+        console.log(error.stack);
+      }
+    }
   }
 
   static registerTask(task: Task) {
     this.init();
     if (Memory.dispatch.tasks[task.id]) return; // Already exists
 
+    if (!task.creepsAssigned) task.creepsAssigned = [];
     Memory.dispatch.tasks[task.id] = task;
     Memory.dispatch.queues[task.priority].push(task.id);
   }
@@ -99,29 +113,97 @@ export class GlobalDispatch {
     return this.getTask(taskId);
   }
 
+  static deleteTask(taskId: string) {
+    if (!Memory.dispatch || !Memory.dispatch.tasks) return;
+
+    const task = Memory.dispatch.tasks[taskId];
+    if (!task) return;
+
+    // Remove from tasks map
+    delete Memory.dispatch.tasks[taskId];
+
+    // Remove from queue
+    const queue = Memory.dispatch.queues[task.priority];
+    if (queue) {
+      const idx = queue.indexOf(taskId);
+      if (idx > -1) {
+        queue.splice(idx, 1);
+      }
+    }
+  }
+
   static completeTask(taskId: string, creepId: string) {
     // Remove assignment
-    if (Memory.dispatch.assignments[creepId] === taskId) {
+    if (
+      Memory.dispatch &&
+      Memory.dispatch.assignments &&
+      Memory.dispatch.assignments[creepId] === taskId
+    ) {
       delete Memory.dispatch.assignments[creepId];
     }
 
-    // Logic to remove task if fully completed?
-    // For now, assume tasks are one-off or managed by Centers.
-    // Ideally, Center checks if task is done.
-    // Here we just unassign.
+    // Update task assignment list
+    const task = this.getTask(taskId);
+    if (task) {
+      if (!task.creepsAssigned) task.creepsAssigned = [];
+      const idx = task.creepsAssigned.indexOf(creepId);
+      if (idx > -1) {
+        task.creepsAssigned.splice(idx, 1);
+      }
+
+      // [NEW] Auto-delete task if configured or one-off type
+      const autoRemoveTypes = [
+        TaskType.PICKUP,
+        TaskType.DELIVER,
+        TaskType.BUILD,
+        TaskType.REPAIR,
+        TaskType.SCOUT,
+        TaskType.TRANSFER,
+      ];
+
+      if (task.autoRemove || autoRemoveTypes.includes(task.type)) {
+        // Only delete if no other creeps are assigned (or maybe even if they are?)
+        // Usually these are 1-creep tasks. If multiple, we wait for all?
+        // Let's assume autoRemove means "when ONE creep finishes it, it's done"
+        // OR "when ALL assigned creeps finish"?
+        // For PICKUP/DELIVER, usually one creep completes the specific amount.
+        // For BUILD, it might take multiple trips.
+        // Let's rely on explicit `autoRemove` flag or specific logic.
+
+        // For now, if it's a "one-off" task and no creeps left assigned, delete it.
+        if (task.creepsAssigned.length === 0) {
+          this.deleteTask(taskId);
+        }
+      }
+    }
   }
 
   private static cleanup() {
+    if (!Memory.dispatch || !Memory.dispatch.assignments) return;
+
     // Remove dead creeps from assignments
     for (const creepId in Memory.dispatch.assignments) {
       if (!Game.creeps[creepId]) {
-        delete Memory.dispatch.assignments[creepId];
+        // Safe task cleanup
+        const taskId = Memory.dispatch.assignments[creepId];
+        if (taskId) {
+          this.completeTask(taskId, creepId);
+        } else {
+          delete Memory.dispatch.assignments[creepId];
+        }
       }
     }
     // Remove tasks that have expired (optional)
   }
 
   private static dispatch(room: Room) {
+    if (
+      !Memory.dispatch ||
+      !Memory.dispatch.assignments ||
+      !Memory.dispatch.queues
+    )
+      return;
+
     // Find idle creeps in this room
     // [Optimization] Only dispatch to idle creeps OR creeps with low priority tasks if CRITICAL task exists
     const idleCreeps = room.find(FIND_MY_CREEPS, {
@@ -163,6 +245,11 @@ export class GlobalDispatch {
       // Try to assign tasks in this queue
       for (let i = 0; i < queue.length; i++) {
         const taskId = queue[i];
+        if (!Memory.dispatch.tasks) {
+          queue.splice(i, 1);
+          i--;
+          continue;
+        }
         const task = Memory.dispatch.tasks[taskId];
 
         // Cleanup invalid tasks
@@ -173,6 +260,7 @@ export class GlobalDispatch {
         }
 
         // Check if task needs more creeps
+        if (!task.creepsAssigned) task.creepsAssigned = [];
         if (task.creepsAssigned.length >= task.maxCreeps) continue;
 
         // Find best creep

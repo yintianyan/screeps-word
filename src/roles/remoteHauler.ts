@@ -35,7 +35,7 @@ export default {
 
         if (container) {
           if (creep.withdraw(container, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-            creep.moveTo(container);
+            creep.moveTo(container, { reusePath: 10 });
           }
           return;
         }
@@ -44,46 +44,28 @@ export default {
       // Idle near source if waiting for miner
       if (source) {
         if (!creep.pos.inRangeTo(source, 3)) {
-          creep.moveTo(source);
+          creep.moveTo(source, { reusePath: 10 });
         }
       }
     } else {
       // DELIVER STATE
       if (creep.room.name !== homeRoom) {
-        creep.moveTo(new RoomPosition(25, 25, homeRoom));
+        creep.moveTo(new RoomPosition(25, 25, homeRoom), { reusePath: 50 });
         return;
       }
 
-      // Deposit to Storage -> Extension -> Spawn
-      const targets = creep.room.find(FIND_STRUCTURES, {
-        filter: (s) => {
-          return (
-            (s.structureType === STRUCTURE_STORAGE ||
-              s.structureType === STRUCTURE_EXTENSION ||
-              s.structureType === STRUCTURE_SPAWN) &&
-            s.store.getFreeCapacity(RESOURCE_ENERGY) > 0
-          );
-        },
+      // Deposit to Spawn/Extension first, then Storage
+      let target: Structure | null = creep.pos.findClosestByRange(FIND_STRUCTURES, {
+          filter: (s) => (s.structureType === STRUCTURE_SPAWN || s.structureType === STRUCTURE_EXTENSION) && s.store.getFreeCapacity(RESOURCE_ENERGY) > 0
       });
 
-      // Prioritize: Extension/Spawn > Storage
-      targets.sort((a, b) => {
-        const priorityA =
-          a.structureType === STRUCTURE_EXTENSION ||
-          a.structureType === STRUCTURE_SPAWN
-            ? 10
-            : 0;
-        const priorityB =
-          b.structureType === STRUCTURE_EXTENSION ||
-          b.structureType === STRUCTURE_SPAWN
-            ? 10
-            : 0;
-        return priorityB - priorityA;
-      });
+      if (!target) {
+          target = creep.room.storage && creep.room.storage.store.getFreeCapacity(RESOURCE_ENERGY) > 0 ? creep.room.storage : null;
+      }
 
-      if (targets.length > 0) {
-        if (creep.transfer(targets[0], RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-          creep.moveTo(targets[0]);
+      if (target) {
+        if (creep.transfer(target, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
+          creep.moveTo(target, { reusePath: 10 });
         }
       }
     }

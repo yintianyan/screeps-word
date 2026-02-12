@@ -70,6 +70,20 @@ declare global {
       lastScan: number;
       status: "pending" | "active" | "completed";
     };
+    remote?: {
+      [roomName: string]: {
+        reserver?: {
+          targetRoom: string;
+          ticksToEnd: number; // Ticks until reservation ends
+          assigned: boolean; // Is a reserver assigned?
+        };
+        threat?: {
+          level: number; // 0-5
+          lastSeen: number;
+          hostiles: number;
+        };
+      };
+    };
     [key: string]: any;
   }
 

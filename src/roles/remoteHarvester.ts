@@ -8,7 +8,7 @@ export default {
     const { targetRoom, sourceId } = task.data;
 
     if (creep.room.name !== targetRoom) {
-      creep.moveTo(new RoomPosition(25, 25, targetRoom));
+      creep.moveTo(new RoomPosition(25, 25, targetRoom), { reusePath: 50 });
       return;
     }
 
@@ -16,7 +16,7 @@ export default {
     if (!source) return; // Should not happen if visible
 
     if (creep.harvest(source) === ERR_NOT_IN_RANGE) {
-      creep.moveTo(source);
+      creep.moveTo(source, { reusePath: 20 });
     } else {
       // Harvested. If we have carry parts, we might need to drop or transfer?
       // Basic Remote Harvester: Just harvest and drop (or fill container if built).

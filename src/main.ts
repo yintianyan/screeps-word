@@ -2,6 +2,7 @@ import Kernel from "./ai/kernel";
 import populationModule from "./components/populationManager";
 import structurePlanner from "./modules/builder/structurePlanner";
 import towerModule from "./modules/defender/tower";
+import linkManager from "./components/linkManager";
 import monitorModule from "./components/monitor";
 import spawnerModule from "./components/spawnManager";
 import creepsModule from "./components/creepManager";
@@ -22,6 +23,8 @@ import { RemoteManager } from "./modules/remote/RemoteManager";
 import scout from "./roles/scout";
 import remoteHarvester from "./roles/remoteHarvester";
 import remoteHauler from "./roles/remoteHauler";
+import remoteReserver from "./roles/remoteReserver";
+import remoteDefender from "./roles/remoteDefender";
 
 // === 注册模块 ===
 
@@ -49,6 +52,7 @@ Kernel.register("remote", RemoteManager); // [NEW] Remote Mining
 
 // 3. 防御与监控 - 房间级别
 Kernel.register("tower", towerModule);
+Kernel.register("link", linkManager); // [NEW] Link Management
 Kernel.register("monitor", monitorModule);
 Kernel.register("traffic", trafficModule);
 
@@ -57,6 +61,8 @@ Kernel.register("traffic", trafficModule);
 creepsModule.register("scout", scout);
 creepsModule.register("remote_harvester", remoteHarvester);
 creepsModule.register("remote_hauler", remoteHauler);
+creepsModule.register("remote_reserver", remoteReserver);
+creepsModule.register("remote_defender", remoteDefender);
 Kernel.register("creeps", creepsModule, "global");
 
 export const loop = function () {

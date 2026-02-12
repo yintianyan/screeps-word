@@ -1,9 +1,6 @@
 import Cache from "./memoryManager";
-import Lifecycle from "./roomManager";
 import TaskManager from "./taskManager";
-
-// Define Energy Levels
-type EnergyLevel = "CRITICAL" | "LOW" | "MEDIUM" | "HIGH";
+import { EnergyManager, CrisisLevel } from "./EnergyManager";
 
 const populationModule = {
   // === 配置区域 (Config) ===
@@ -19,16 +16,11 @@ const populationModule = {
       upgrader: 3,
       hauler: 6,
     },
-    // 能量等级阈值 (Hysteresis implemented in logic)
-    thresholds: {
-      low: 0.5,
-      high: 0.8,
-    },
     // 部件限制
     partLimits: {
       LOW: 3,
       MEDIUM: 6,
-      HIGH: 12, // Increased slightly from 10 to allow better RCL3+ creeps
+      HIGH: 12,
     },
   },
 
@@ -38,9 +30,9 @@ const populationModule = {
   run: function (room: Room) {
     // 每 5 tick 运行一次重新平衡
     if (Game.time % 5 === 0) {
+      EnergyManager.update(room); // [NEW] Update Crisis Level
       this.rebalanceHaulers(room);
-      this.updateEnergyLevel(room);
-      this.updateHarvesterRegistry(room); // [Rule 2]
+      this.updateHarvesterRegistry(room);
     }
   },
 
@@ -70,136 +62,39 @@ const populationModule = {
 
   /**
    * 更新房间能量等级 (带滞后机制)
+   * Deprecated: Now handled by EnergyManager, but kept for compatibility if needed.
+   * Or we can remove it. Let's redirect to EnergyManager logic if possible.
+   * But EnergyManager.update() is already called in run().
+   * Let's stub this out or remove calls to it.
    */
   updateEnergyLevel: function (room: Room) {
-    if (!room.memory.energyLevel) {
-      room.memory.energyLevel = "LOW";
-    }
-
-    const capacity = room.energyCapacityAvailable || 300;
-    const available = room.energyAvailable;
-    const percentage = available / capacity;
-    const currentLevel = room.memory.energyLevel as EnergyLevel;
-
-    // Critical check (Override based on Total Energy)
-    // Calculate Total Usable Energy (Spawn + Ext + Storage + Containers + Dropped)
-    const containers = Cache.getStructures(
-      room,
-      STRUCTURE_CONTAINER,
-    ) as StructureContainer[];
-    const containerEnergy = containers.reduce(
-      (sum, c) => sum + c.store[RESOURCE_ENERGY],
-      0,
-    );
-    const storageEnergy = room.storage
-      ? room.storage.store[RESOURCE_ENERGY]
-      : 0;
-    const dropped = Cache.getTick(`dropped_${room.name}`, () =>
-      room.find(FIND_DROPPED_RESOURCES),
-    );
-    const droppedEnergy = dropped.reduce(
-      (sum, r) => sum + (r.resourceType === RESOURCE_ENERGY ? r.amount : 0),
-      0,
-    );
-
-    const totalEnergy =
-      available + containerEnergy + storageEnergy + droppedEnergy;
-    room.memory.totalEnergy = totalEnergy; // Store for other modules
-
-    // If total energy is less than what's needed for a basic recovery (e.g. 2 max creeps ~ 1000-2000),
-    // or if we literally can't spawn anything.
-    if (available < 300 && capacity >= 300) {
-      room.memory.energyLevel = "CRITICAL";
-      return;
-    }
-
-    // If we have capacity but total energy is extremely low, we are in a resource crisis
-    // RCL 3 threshold: 2000 (containers empty)
-    // RCL 4+ threshold: 5000 (storage empty)
-    const crisisThreshold =
-      room.controller && room.controller.level >= 4 ? 5000 : 2000;
-
-    // [FIX] Post-Spawn Crisis Prevention
-    // If we just spawned something big, available energy drops to 0.
-    // But if we have valid creep population, we shouldn't panic.
-    const harvesters = Cache.getCreepsByRole(room, "harvester");
-    const haulers = Cache.getCreepsByRole(room, "hauler");
-    const healthyPopulation = harvesters.length > 0 && haulers.length > 0;
-
-    if (totalEnergy < crisisThreshold && capacity >= 550) {
-      // Only enter CRITICAL if population is also critical
-      // If we have miners and haulers, we are just "Low", not "Critical"
-      if (!healthyPopulation) {
-        room.memory.energyLevel = "CRITICAL";
-        return;
-      } else {
-        // If total energy is low but we have workers, force LOW instead of CRITICAL
-        // to allow builders to work (if logic permits)
-        room.memory.energyLevel = "LOW";
-        // Do not return, let hysteresis logic run, but ensure it doesn't go below LOW
-      }
-    }
-
-    let newLevel = currentLevel;
-
-    // Hysteresis Buffers: +/- 0.05
-    if (currentLevel === "CRITICAL") {
-      // Exit critical if we have basic energy OR healthy population
-      if (available >= 300 || healthyPopulation) newLevel = "LOW";
-    } else if (currentLevel === "LOW") {
-      if (percentage > this.config.thresholds.low + 0.05) newLevel = "MEDIUM";
-    } else if (currentLevel === "MEDIUM") {
-      if (percentage > this.config.thresholds.high + 0.05) newLevel = "HIGH";
-      if (percentage < this.config.thresholds.low - 0.05) newLevel = "LOW";
-    } else if (currentLevel === "HIGH") {
-      if (percentage < this.config.thresholds.high - 0.05) newLevel = "MEDIUM";
-    }
-
-    // [New] Reserve Cap
-    // If we have no storage reserve (containers empty), do not allow HIGH level
-    // This prevents over-spawning when only Spawn is full but economy is fragile
-    if (totalEnergy < capacity + 1000) {
-      if (newLevel === "HIGH") newLevel = "MEDIUM";
-    }
-    if (totalEnergy < capacity + 200) {
-      if (newLevel === "MEDIUM") newLevel = "LOW";
-    }
-
-    if (newLevel !== currentLevel) {
-      room.memory.energyLevel = newLevel;
-      console.log(
-        `[Energy] Room ${room.name} level changed: ${currentLevel} -> ${newLevel} (${(percentage * 100).toFixed(1)}%)`,
-      );
-    }
+    // No-op or log
   },
 
-  getEnergyLevel: function (room: Room): EnergyLevel {
-    return (room.memory.energyLevel as EnergyLevel) || "LOW";
+  getEnergyLevel: function (room: Room): string {
+    return CrisisLevel[EnergyManager.getLevel(room)];
   },
 
-  /** @param {Room} room **/
+  /**
+   * Calculate Target Counts using EnergyManager
+   */
   calculateTargets: function (room: Room) {
-    const targets = {
+    const targets: Record<string, number> = {
       harvester: 0,
       upgrader: 0,
       builder: 0,
       hauler: 0,
     };
 
-    // 使用缓存获取 Source (堆缓存)
     const sources = Cache.getHeap(
       `sources_${room.name}`,
       () => room.find(FIND_SOURCES),
       1000,
     );
 
-    // === 1. Harvester: 动态计算 ===
+    // === 1. Harvester ===
     let harvesterTarget = 0;
     sources.forEach((source) => {
-      // [FIX] Harvester Count Logic
-      // 1. If we have a 5+ WORK harvester (can mine 10 energy/tick), we only need 1 per source.
-      // 2. If we are in CRITICAL/LOW energy, we might need more small ones to ramp up.
-
       const existingHarvesters = Cache.getCreepsByRole(
         room,
         "harvester",
@@ -208,16 +103,10 @@ const populationModule = {
         (sum, c) => sum + c.getActiveBodyparts(WORK),
         0,
       );
-
-      // Check if current harvesting power is sufficient (>= 5 WORK)
-      // Source: 3000 energy / 300 ticks = 10 energy/tick.
-      // 1 WORK = 2 energy/tick. So 5 WORK is max.
       const isSufficient = totalWorkParts >= 5;
-
       let desired = 1;
 
       if (!isSufficient) {
-        // If not sufficient, we might need another one if spots allow
         const spots = Cache.getHeap(
           `spots_${source.id}`,
           () => {
@@ -239,38 +128,20 @@ const populationModule = {
           1000,
         );
 
-        // In early game (RCL < 3) or if existing harvesters are very small, fill spots
-        // But limit to 2 to avoid congestion unless spots=1
-        if (room.controller && room.controller.level < 3) {
+        // In Crisis, allow multiple small harvesters to restore economy
+        const level = EnergyManager.getLevel(room);
+        if (level === CrisisLevel.CRITICAL || level === CrisisLevel.HIGH) {
           desired = Math.min(spots, 2);
-        } else {
-          // RCL 3+: Try to rely on 1 big harvester.
-          // If current is small (< 5 WORK), spawn another to help?
-          // Or just spawn 1 replacement?
-          // SpawnCenter handles replacement. Here we calculate target count.
-          // If we have 1 harvester with 2 WORK, we want 1 target (wait for it to die and replace with better)
-          // UNLESS we are in CRITICAL mode.
-          const level = this.getEnergyLevel(room);
-          if (level === "CRITICAL" || level === "LOW") {
-            desired = Math.min(spots, 2);
-          }
+        } else if (room.controller && room.controller.level < 3) {
+          desired = Math.min(spots, 2);
         }
-      } else {
-        // If sufficient, strictly 1
-        desired = 1;
       }
-
       harvesterTarget += desired;
     });
     targets.harvester = harvesterTarget;
 
-    // === 2. Energy Check for Builder/Upgrader ===
-    // Check if we are in early game (RCL < 3)
-    // const isEarlyGame = room.controller && room.controller.level < 3;
-    const level = this.getEnergyLevel(room);
-
-    // Get harvesters count for safety checks
-    const harvesters = Cache.getCreepsByRole(room, "harvester").length;
+    // === 2. Builder & Upgrader (Budget Based) ===
+    const level = EnergyManager.getLevel(room);
 
     // Check Container Reserves
     const containers = Cache.getStructures(
@@ -281,60 +152,51 @@ const populationModule = {
       (sum, c) => sum + c.store[RESOURCE_ENERGY],
       0,
     );
-    const hasReserves = containerEnergy > 1000;
 
     // Analyze Task Loads
     const tasks = TaskManager.analyze(room);
 
-    // Default 0
-    targets.builder = 0;
+    // Get Budgets from EnergyManager
+    // Note: EnergyManager returns "Budget" which might be interpreted as "Total Work Parts" or "Count".
+    // Let's assume Count for now, but we should refine EnergyManager to return "Max Active Count" or similar.
+    // Actually, EnergyManager returns WORK parts budget.
+    // For population, we need COUNT.
+    // Let's use a mapping: Budget 5 -> 1 creep (5W). Budget 10 -> 2 creeps.
+    // Or just simple count mapping based on Crisis Level.
+
+    // Let's stick to the previous logic but modified by Crisis Level
+
+    // Base counts
     targets.upgrader = 1;
+    targets.builder = 0;
 
-    // --- Dynamic Builder Logic based on Task Difficulty ---
-    if (tasks.construction.difficulty === "HIGH") {
-      targets.builder = 3;
-    } else if (tasks.construction.difficulty === "MEDIUM") {
-      targets.builder = 2;
-    } else if (tasks.construction.difficulty === "LOW") {
-      targets.builder = 1;
-    } else {
-      // No construction -> Check repair load
-      // If repair is HIGH, maybe spawn a builder (which also repairs)
-      if (tasks.repair.difficulty === "HIGH") targets.builder = 1;
-    }
+    // Builder Demand
+    if (tasks.construction.difficulty === "HIGH") targets.builder = 3;
+    else if (tasks.construction.difficulty === "MEDIUM") targets.builder = 2;
+    else if (tasks.construction.difficulty === "LOW") targets.builder = 1;
+    else if (tasks.repair.difficulty === "HIGH") targets.builder = 1;
 
-    // Energy Constraint Override
-    if (level === "CRITICAL") {
+    // Crisis Overrides
+    if (level === CrisisLevel.CRITICAL) {
       targets.builder = 0;
-      targets.upgrader = 0; // Stop upgrading in critical unless downgrade imminent
+      targets.upgrader = 0;
+      // Downgrade protection
       if (room.controller && room.controller.ticksToDowngrade < 2000)
         targets.upgrader = 1;
-    } else if (level === "LOW") {
-      // In early game LOW, building extensions is risky if it drains spawn
-      // Only build if we have at least 1 full harvester working?
-      // Reduce builder count by 1 (min 0)
-      targets.builder = Math.max(0, targets.builder - 1);
-
-      // But if critical sites exist, keep at least 1
-      if (
-        tasks.construction.primaryTarget === STRUCTURE_EXTENSION ||
-        tasks.construction.primaryTarget === STRUCTURE_SPAWN
-      ) {
-        if (targets.builder === 0 && harvesters > 0) targets.builder = 1;
-      }
-
+    } else if (level === CrisisLevel.HIGH) {
+      targets.builder = Math.min(targets.builder, 1); // Max 1 builder
       targets.upgrader = 1;
-    } else if (level === "MEDIUM") {
-      // Allow calculated targets, but cap upgrader
-      targets.upgrader = hasReserves ? 2 : 1; // Cap at 1 if no reserves
-    } else if (level === "HIGH") {
-      // Allow max
-      targets.upgrader = hasReserves ? 3 : 2; // Cap at 2 if no reserves
-      // If no construction, boost upgrader
-      if (targets.builder === 0) targets.upgrader = hasReserves ? 4 : 2;
+    } else if (level === CrisisLevel.MEDIUM) {
+      targets.builder = Math.min(targets.builder, 2);
+      targets.upgrader = 1;
+      if (containerEnergy > 2000) targets.upgrader = 2;
+    } else {
+      // LOW or NONE (Abundance)
+      if (containerEnergy > 5000) targets.upgrader = 3;
+      else targets.upgrader = 2;
     }
 
-    // [New] Hard Cap if containers are empty (Anti-Starvation)
+    // Anti-Starvation
     if (containerEnergy < 200 && containers.length > 0) {
       targets.upgrader = 1;
       targets.builder = Math.min(targets.builder, 1);
@@ -344,29 +206,29 @@ const populationModule = {
     targets.builder = Math.min(targets.builder, this.config.limits.builder);
     targets.upgrader = Math.min(targets.upgrader, this.config.limits.upgrader);
 
-    // === 3. Hauler Calculation ===
+    // === 3. Hauler ===
     const haulerNeeds = this.getHaulerNeeds(room);
     targets.hauler = 0;
     for (const sourceId in haulerNeeds) {
       targets.hauler += haulerNeeds[sourceId];
     }
     targets.hauler = Math.min(targets.hauler, this.config.limits.hauler);
+    if (targets.harvester > 0 && targets.hauler < 1) targets.hauler = 1;
 
-    // Safety for Hauler
-    if (targets.harvester > 0 && targets.hauler < 1) {
-      targets.hauler = 1;
-    }
-    if (tasks.construction.count === 0 && tasks.repair.count === 0) {
-      targets.builder = 0;
-    }
-
-    // Limits
-    targets.builder = Math.min(targets.builder, this.config.limits.builder);
-    targets.upgrader = Math.min(targets.upgrader, this.config.limits.upgrader);
-
-    // If upgrading, ensure enough haulers
-    if (targets.upgrader > 1) {
-      // Just a simple heuristic, ideally calculate throughput
+    // === 4. Tasks ===
+    if (Memory.dispatch && Memory.dispatch.tasks) {
+      for (const id in Memory.dispatch.tasks) {
+        const task = Memory.dispatch.tasks[id];
+        if (!task.creepsAssigned) task.creepsAssigned = [];
+        if (task.creepsAssigned.length < task.maxCreeps) {
+          if (task.validRoles && task.validRoles.length > 0) {
+            const role = task.validRoles[0];
+            targets[role] =
+              (targets[role] || 0) +
+              (task.maxCreeps - task.creepsAssigned.length);
+          }
+        }
+      }
     }
 
     return targets;
@@ -384,11 +246,24 @@ const populationModule = {
     );
     const level = this.getEnergyLevel(room);
 
+    // [Optimization] Throughput-based Calculation
+    // 1. Estimate Hauler Body Capacity at current RCL
+    const capacityAvailable = room.energyCapacityAvailable;
+    // Body: [CARRY, MOVE] = 100 cost. Capacity 50.
+    // Max sets = floor(capacity / 100). Max parts limit 50 -> 25 sets.
+    const maxSets = Math.min(Math.floor(capacityAvailable / 100), 25);
+    const singleHaulerCapacity = maxSets * 50;
+
+    // 2. Find Drop Point (Storage > Spawn)
+    const dropPoint = room.storage || room.find(FIND_MY_SPAWNS)[0];
+
+    // Global Boost for Idle Upgraders
     let globalBoost = 0;
-    // Only apply boost if not CRITICAL
     if (level !== "CRITICAL") {
-      const upgraders = Cache.getCreepsByRole(room, "upgrader").filter((c) =>
-        Lifecycle.isOperational(c),
+      const upgraders = Cache.getCreepsByRole(room, "upgrader").filter(
+        (c) =>
+          !Memory.lifecycle?.registry?.[c.name] ||
+          Memory.lifecycle.registry[c.name] !== "PRE_SPAWNING",
       );
       const avgIdle =
         upgraders.reduce((sum, c) => sum + (c.memory.idleTicks || 0), 0) /
@@ -409,37 +284,72 @@ const populationModule = {
         return;
       }
 
-      let count = this.config.ratios.haulerBaseCount;
-
-      if (level !== "CRITICAL") {
-        const allContainers = Cache.getStructures(room, STRUCTURE_CONTAINER);
-        const container = allContainers.find((c) => c.pos.inRangeTo(source, 2));
-
-        if (container) {
-          const energy = container.store[RESOURCE_ENERGY];
-          if (energy > 1500)
-            count += 2; // Aggressive hauling for high stockpile
-          else if (energy > 800) count += 1;
-        }
-
-        const allDropped = Cache.getTick(`dropped_${room.name}`, () =>
-          room.find(FIND_DROPPED_RESOURCES),
-        );
-        const dropped = allDropped.filter(
-          (r) =>
-            r.resourceType === RESOURCE_ENERGY && r.pos.inRangeTo(source, 3),
-        );
-        const droppedAmount = dropped.reduce((sum, r) => sum + r.amount, 0);
-        if (droppedAmount > 500) count += 1;
-
-        count += globalBoost;
-        count = Math.min(count, 4); // Max 4 per source
-      } else {
-        // Critical Mode Cap
-        count = 1;
+      if (level === "CRITICAL") {
+        needs[source.id] = 1; // Survival mode
+        return;
       }
 
-      needs[source.id] = count;
+      // Calculate Distance (Cache it?)
+      // Simple range is often enough, pathfinding is expensive.
+      // Use Chebyshev distance (max(dx, dy)) as a heuristic.
+      // Or Manhattan? Pathfinding is best but let's assume range * 1.5 for terrain.
+      let distance = 25; // Default
+      if (dropPoint) {
+        // Use cached path length if possible, or simple range
+        distance = source.pos.findPathTo(dropPoint, {
+          ignoreCreeps: true,
+        }).length;
+      }
+
+      // Throughput Formula:
+      // Source Generation: 10 energy/tick (3000 / 300)
+      // Round Trip: (Distance * 2) + 10 (Load/Unload/Fatigue buffer)
+      // Required Capacity per Tick: 10
+      // Capacity per Trip: singleHaulerCapacity
+      // Trips per Hauler per Tick: 1 / RoundTrip
+      // Capacity per Hauler per Tick: singleHaulerCapacity / RoundTrip
+      // Required Haulers: 10 / (singleHaulerCapacity / RoundTrip)
+
+      const roundTripTime = distance * 2.1 + 10; // 10% buffer for fatigue/traffic + 10 ops
+      const capacityPerTick = singleHaulerCapacity / roundTripTime;
+
+      // Base Count
+      let count = Math.ceil(10 / capacityPerTick);
+
+      // [Dynamic Adjustment]
+      // If stockpile is high, we might need more to clear it (burst)
+      // But sustainable count is 'count'.
+      // Add burst haulers if pile is growing.
+
+      const allContainers = Cache.getStructures(room, STRUCTURE_CONTAINER);
+      const container = allContainers.find((c) => c.pos.inRangeTo(source, 2));
+
+      if (container) {
+        const energy = container.store[RESOURCE_ENERGY];
+        if (energy > 1500 && count < 3) count += 1; // Help clear backlog
+      }
+
+      // Dropped resources
+      const allDropped = Cache.getTick(`dropped_${room.name}`, () =>
+        room.find(FIND_DROPPED_RESOURCES),
+      );
+      const dropped = allDropped.filter(
+        (r) => r.resourceType === RESOURCE_ENERGY && r.pos.inRangeTo(source, 3),
+      );
+      const droppedAmount = dropped.reduce((sum, r) => sum + r.amount, 0);
+      if (droppedAmount > 1000) count += 1;
+
+      count += globalBoost;
+
+      // Sanity Limits
+      // At RCL 8, 1 hauler can carry 1250 (25 parts).
+      // Distance 25 -> Trip 60. Capacity/Tick = 1250/60 = 20.
+      // 10 / 20 = 0.5. So 1 hauler is plenty.
+      // At RCL 2 (300 cap -> 150 carry). Trip 60. Cap/Tick = 150/60 = 2.5.
+      // 10 / 2.5 = 4. So 4 haulers.
+      // Logic holds up.
+
+      needs[source.id] = Math.max(1, Math.min(count, 5));
     });
 
     return needs;
@@ -451,7 +361,10 @@ const populationModule = {
   rebalanceHaulers: function (room: Room) {
     const needs = this.getHaulerNeeds(room);
     const haulers = Cache.getCreepsByRole(room, "hauler").filter(
-      (c) => c.ticksToLive > 100 && Lifecycle.isOperational(c),
+      (c) =>
+        c.ticksToLive > 100 &&
+        (!Memory.lifecycle?.registry?.[c.name] ||
+          Memory.lifecycle.registry[c.name] !== "PRE_SPAWNING"),
     );
 
     const currentCounts: Record<string, number> = {};
@@ -521,8 +434,11 @@ const populationModule = {
     // 强制模板映射表 (Template Mapping)
     // 优先级：Template > Procedural Generation
     if (role === "harvester") {
-      if (energyBudget >= 650) {
-        return [WORK, WORK, WORK, WORK, WORK, CARRY, MOVE]; // 5W 1C 1M (Cost 650) - Optimal
+      if (energyBudget >= 800) {
+        // RCL 3+
+        return [WORK, WORK, WORK, WORK, WORK, CARRY, MOVE, MOVE, MOVE]; // 5W 1C 3M (Cost 700) - Fast
+      } else if (energyBudget >= 650) {
+        return [WORK, WORK, WORK, WORK, WORK, CARRY, MOVE]; // 5W 1C 1M (Cost 650) - Optimal Production
       } else if (energyBudget >= 550) {
         return [WORK, WORK, WORK, WORK, CARRY, MOVE, MOVE]; // 4W 1C 2M (Cost 550)
       } else if (energyBudget >= 300) {
@@ -536,6 +452,16 @@ const populationModule = {
           // Note: Callers need to handle null!
         }
       }
+    } else if (role === "remote_harvester") {
+      // Remote Miner: Needs to move fast and work hard
+      if (energyBudget >= 800)
+        return [WORK, WORK, WORK, WORK, WORK, MOVE, MOVE, MOVE, MOVE, MOVE]; // 5W 5M
+      if (energyBudget >= 650)
+        return [WORK, WORK, WORK, WORK, WORK, MOVE, MOVE, MOVE]; // 5W 3M (Slow)
+      // Fallback
+    } else if (role === "remote_hauler") {
+      // Remote Hauler: Max Carry + Move
+      // 1 CARRY + 1 MOVE = 100
     }
 
     // Procedural Generation with Scoring (Rule 5)
@@ -587,13 +513,20 @@ const populationModule = {
     // ... Reuse existing logic logic but adapted ...
     // For brevity, using a simplified version of previous logic here
     const configs: Record<string, any> = {
-      harvester: { base: [WORK, CARRY, MOVE], grow: [WORK] },
+      harvester: { base: [WORK, CARRY, MOVE], grow: [WORK, WORK, MOVE] }, // Add MOVE to keep up speed
       hauler: { base: [CARRY, MOVE], grow: [CARRY, MOVE] },
       upgrader: { base: [WORK, CARRY, MOVE], grow: [WORK, WORK, MOVE] },
       builder: { base: [WORK, CARRY, MOVE], grow: [WORK, CARRY, MOVE] },
       scout: { base: [MOVE], grow: [] }, // Scout is just 1 MOVE
-      remote_harvester: { base: [WORK, WORK, MOVE, MOVE], grow: [WORK, MOVE] }, // 1:1 WORK:MOVE for speed? Or Efficiency?
-      remote_hauler: { base: [CARRY, CARRY, MOVE], grow: [CARRY, CARRY, MOVE] }, // 2:1 CARRY:MOVE (Roads) or 1:1 (Plain)? Assume 1:1 for safety
+      remote_harvester: {
+        base: [WORK, WORK, MOVE, MOVE],
+        grow: [WORK, WORK, MOVE],
+      }, // Balance
+      remote_defender: {
+        base: [TOUGH, ATTACK, MOVE, MOVE],
+        grow: [TOUGH, ATTACK, MOVE, MOVE],
+      },
+      remote_reserver: { base: [CLAIM, MOVE], grow: [CLAIM, MOVE] },
     };
 
     const config = configs[role] || configs.harvester;

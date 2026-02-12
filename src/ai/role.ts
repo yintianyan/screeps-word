@@ -1,6 +1,6 @@
 import moveModule from "../utils/movement";
 import { GlobalDispatch } from "./GlobalDispatch";
-import { Task } from "../types/dispatch";
+import { Task, TaskType } from "../types/dispatch";
 
 /**
  * @typedef {Object} Task
@@ -66,7 +66,7 @@ export default class Role {
     if (
       !this.creep.pos.inRangeTo(
         pos,
-        task.type === "HARVEST" || task.type === "ATTACK" ? 1 : 3,
+        task.type === TaskType.HARVEST || task.type === TaskType.ATTACK ? 1 : 3,
       )
     ) {
       this.move(pos);
@@ -76,7 +76,7 @@ export default class Role {
     // Action Execution
     let result: number = OK;
     switch (task.type) {
-      case "HARVEST":
+      case TaskType.HARVEST:
         if (target instanceof Source || target instanceof Mineral) {
           result = this.creep.harvest(target as Source);
           // Sticky Task: Do not complete even if full (handled by link/container)
@@ -84,7 +84,8 @@ export default class Role {
           // For now, let Harvester be simple.
         }
         break;
-      case "TRANSFER":
+      case TaskType.HAUL:
+      case TaskType.TRANSFER:
         if (target instanceof Structure || target instanceof Creep) {
           result = this.creep.transfer(
             target as AnyCreep | Structure,
@@ -105,7 +106,7 @@ export default class Role {
           }
         }
         break;
-      case "PICKUP":
+      case TaskType.PICKUP:
         if (target instanceof Resource) {
           result = this.creep.pickup(target);
         } else if (target instanceof Structure) {
@@ -124,7 +125,7 @@ export default class Role {
           }
         }
         break;
-      case "BUILD":
+      case TaskType.BUILD:
         if (target instanceof ConstructionSite) {
           result = this.creep.build(target);
         }
@@ -134,7 +135,7 @@ export default class Role {
           GlobalDispatch.completeTask(task.id, this.creep.id);
         }
         break;
-      case "REPAIR":
+      case TaskType.REPAIR:
         if (target instanceof Structure) {
           result = this.creep.repair(target);
         }
@@ -145,7 +146,7 @@ export default class Role {
           GlobalDispatch.completeTask(task.id, this.creep.id);
         }
         break;
-      case "UPGRADE":
+      case TaskType.UPGRADE:
         if (target instanceof StructureController) {
           result = this.creep.upgradeController(target);
         }
@@ -155,12 +156,12 @@ export default class Role {
           GlobalDispatch.completeTask(task.id, this.creep.id);
         }
         break;
-      case "ATTACK":
+      case TaskType.ATTACK:
         if (target instanceof Creep || target instanceof Structure) {
           result = this.creep.attack(target as AnyCreep | Structure);
         }
         break;
-      case "HEAL":
+      case TaskType.HEAL:
         if (target instanceof Creep) {
           result = this.creep.heal(target);
         }

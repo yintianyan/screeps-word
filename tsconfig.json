@@ -15,8 +15,8 @@
     "noImplicitThis": true,
     "noUnusedLocals": false,
     "alwaysStrict": true,
-    "types": ["screeps", "lodash", "node"]
+    "types": ["screeps", "lodash", "node", "jest"]
   },
-  "include": ["src/**/*"],
+  "include": ["src/**/*", "tests/**/*"],
   "exclude": ["node_modules", "test"]
 }

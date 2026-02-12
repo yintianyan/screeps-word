@@ -22,6 +22,19 @@ export default class Harvester extends Role {
     } else {
       // 2. Transfer (Full)
       // Check for Link/Container nearby
+      const link = source.pos.findInRange(FIND_STRUCTURES, 2, {
+        filter: (s) =>
+          s.structureType === STRUCTURE_LINK &&
+          (s as StructureLink).store.getFreeCapacity(RESOURCE_ENERGY) > 0,
+      })[0];
+
+      if (link) {
+        if (this.creep.transfer(link, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
+          this.move(link);
+        }
+        return;
+      }
+
       const container = source.pos.findInRange(FIND_STRUCTURES, 1, {
         filter: (s) =>
           s.structureType === STRUCTURE_CONTAINER &&
@@ -61,9 +74,34 @@ export default class Harvester extends Role {
 
   assignSource() {
     const sources = this.creep.room.find(FIND_SOURCES);
-    // Simple random assignment for now, or use population module's logic
-    // Ideally this should be passed from Spawner
-    this.memory.sourceId =
-      sources[Math.floor(Math.random() * sources.length)].id;
+    const harvesters = this.creep.room.find(FIND_MY_CREEPS, {
+      filter: (c) => c.memory.role === "harvester" && c.id !== this.creep.id,
+    });
+
+    // Count existing assignments
+    const assignments: Record<string, number> = {};
+    sources.forEach((s) => (assignments[s.id] = 0));
+    harvesters.forEach((c) => {
+      if (c.memory.sourceId) {
+        assignments[c.memory.sourceId] =
+          (assignments[c.memory.sourceId] || 0) + 1;
+      }
+    });
+
+    // Find source with minimum assignments
+    let bestSource = sources[0];
+    let minCount = Infinity;
+
+    for (const source of sources) {
+      const count = assignments[source.id];
+      if (count < minCount) {
+        minCount = count;
+        bestSource = source;
+      }
+    }
+
+    if (bestSource) {
+      this.memory.sourceId = bestSource.id;
+    }
   }
 }

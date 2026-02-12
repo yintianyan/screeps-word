@@ -62,6 +62,24 @@ export default class Upgrader extends Role {
       const hasActiveHaulers = haulers.length > 0;
 
       // 1. Link (if available and near controller)
+      if (this.creep.room.controller) {
+        const link = this.creep.room.controller.pos.findInRange(
+          FIND_STRUCTURES,
+          3,
+          {
+            filter: (s) =>
+              s.structureType === STRUCTURE_LINK &&
+              s.store[RESOURCE_ENERGY] > 0,
+          },
+        )[0];
+        if (link) {
+          if (this.creep.withdraw(link, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
+            this.move(link);
+          }
+          return;
+        }
+      }
+
       // 2. Storage
       // 3. Container
       // 4. Source (last resort, usually avoided)

@@ -50,10 +50,10 @@ export const CreepTemplates: { [key: string]: BodyTemplate } = {
 };
 
 export const RoleToTaskMap: { [role: string]: TaskType[] } = {
-  harvester: ['HARVEST'],
-  hauler: ['TRANSFER', 'PICKUP'],
-  upgrader: ['UPGRADE'],
-  builder: ['BUILD', 'REPAIR', 'TRANSFER'],
-  defender: ['DEFEND', 'ATTACK'],
-  repairer: ['REPAIR']
+  harvester: [TaskType.HARVEST],
+  hauler: [TaskType.TRANSFER, TaskType.PICKUP, TaskType.HAUL],
+  upgrader: [TaskType.UPGRADE],
+  builder: [TaskType.BUILD, TaskType.REPAIR, TaskType.TRANSFER],
+  defender: [TaskType.DEFEND, TaskType.ATTACK],
+  repairer: [TaskType.REPAIR]
 };
