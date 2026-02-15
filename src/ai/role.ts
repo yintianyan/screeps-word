@@ -79,6 +79,46 @@ export default class Role {
       case TaskType.HARVEST:
         if (target instanceof Source || target instanceof Mineral) {
           result = this.creep.harvest(target as Source);
+          if (result === ERR_FULL) {
+            const sourcePos = (target as any).pos;
+            const link = sourcePos.findInRange(FIND_STRUCTURES, 2, {
+              filter: (s: any) =>
+                s.structureType === STRUCTURE_LINK &&
+                s.store?.getFreeCapacity(RESOURCE_ENERGY) > 0,
+            })[0] as StructureLink | undefined;
+
+            const container = sourcePos.findInRange(FIND_STRUCTURES, 1, {
+              filter: (s: any) =>
+                s.structureType === STRUCTURE_CONTAINER &&
+                s.store?.getFreeCapacity(RESOURCE_ENERGY) > 0,
+            })[0] as StructureContainer | undefined;
+
+            const nearFullContainer =
+              container &&
+              container.store.getFreeCapacity(RESOURCE_ENERGY) <
+                this.creep.store.getUsedCapacity(RESOURCE_ENERGY);
+
+            if (link && (nearFullContainer || this.creep.pos.inRangeTo(link, 1))) {
+              const tr = this.creep.transfer(link, RESOURCE_ENERGY);
+              if (tr === ERR_NOT_IN_RANGE) this.move(link);
+              return;
+            }
+
+            if (container) {
+              const tr = this.creep.transfer(container, RESOURCE_ENERGY);
+              if (tr === ERR_NOT_IN_RANGE) this.move(container);
+              return;
+            }
+
+            if (link) {
+              const tr = this.creep.transfer(link, RESOURCE_ENERGY);
+              if (tr === ERR_NOT_IN_RANGE) this.move(link);
+              return;
+            }
+
+            this.creep.drop(RESOURCE_ENERGY);
+            return;
+          }
           // Sticky Task: Do not complete even if full (handled by link/container)
           // Only if no capacity and no link nearby?
           // For now, let Harvester be simple.

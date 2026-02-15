@@ -88,6 +88,11 @@ export default class Hauler extends Role {
       brain.generateTasks();
       const task = brain.getBestTask(this.creep);
 
+      // [Optimization] Brain task integration
+      // Brain logic might return "transfer_spawn" or others.
+      // If we are in CRITICAL mode, we MUST prioritize Spawn/Ext.
+      // If Brain returns something else (e.g. build), we might ignore it if CRITICAL.
+      
       if (task && task.type === "transfer_spawn") {
         const target = Game.getObjectById(task.targetId as Id<Structure>);
         if (target) {
@@ -122,7 +127,24 @@ export default class Hauler extends Role {
             });
           }
         });
+        
       }
+
+      // 1.5 Source Links - Priority 190 (High Priority to clear containers)
+      const sourceLinks = this.creep.room.find(FIND_MY_STRUCTURES, {
+          filter: (s) => s.structureType === STRUCTURE_LINK && 
+                         s.store.getFreeCapacity(RESOURCE_ENERGY) > 0 &&
+                         this.creep.room.find(FIND_SOURCES).some(src => s.pos.inRangeTo(src, 2))
+      });
+      sourceLinks.forEach(link => {
+          candidates.push({
+              target: link,
+              priority: 190,
+              type: "source_link",
+              pos: link.pos,
+              visual: { stroke: "#0000ff" }
+          });
+      });
 
       // If NOT CRITICAL, add other targets
       if (energyLevel !== "CRITICAL") {
@@ -216,7 +238,11 @@ export default class Hauler extends Role {
             return nearController || nearSpawn;
           },
         });
-        sinkContainers.forEach((s) => {
+        const cacheTarget =
+          (this.creep.room.controller?.level || 1) < 4 ? 1500 : 5000;
+        sinkContainers
+          .filter((s) => (s as AnyStoreStructure).store[RESOURCE_ENERGY] < cacheTarget)
+          .forEach((s) => {
           candidates.push({
             target: s,
             priority: 50,
@@ -226,19 +252,6 @@ export default class Hauler extends Role {
           });
         });
 
-        // 7. Storage - Priority 10
-        if (
-          this.creep.room.storage &&
-          this.creep.room.storage.store.getFreeCapacity(RESOURCE_ENERGY) > 0
-        ) {
-          candidates.push({
-            target: this.creep.room.storage,
-            priority: 10,
-            type: "storage",
-            pos: this.creep.room.storage.pos,
-            visual: { stroke: "#ffffff", opacity: 0.3 },
-          });
-        }
       }
 
       // === SCORING & SELECTION ===
@@ -295,22 +308,18 @@ export default class Hauler extends Role {
     } else {
       // === COLLECT STATE ===
       // 0. Receiver Link (Near Storage)
-      if (this.creep.room.storage) {
-        const link = this.creep.room.storage.pos.findInRange(
-          FIND_STRUCTURES,
-          2,
-          {
-            filter: (s) =>
-              s.structureType === STRUCTURE_LINK &&
-              s.store[RESOURCE_ENERGY] > 0,
-          },
-        )[0];
-        if (link) {
-          if (this.creep.withdraw(link, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-            this.move(link);
-          }
-          return;
+      const receiverLink = this.creep.room.find(FIND_STRUCTURES, {
+        filter: (s) =>
+          s.structureType === STRUCTURE_LINK &&
+          s.store[RESOURCE_ENERGY] > 0 &&
+          ((this.creep.room.controller && s.pos.inRangeTo(this.creep.room.controller, 4)) ||
+            s.pos.findInRange(FIND_MY_SPAWNS, 4).length > 0),
+      })[0] as StructureLink | undefined;
+      if (receiverLink) {
+        if (this.creep.withdraw(receiverLink, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
+          this.move(receiverLink);
         }
+        return;
       }
 
       // 0.5 Tombstones & Ruins

@@ -28,31 +28,45 @@ export enum TaskPriority {
   IDLE = 5, // Scouting, signing controller
 }
 
+// Task Status
+export enum TaskStatus {
+  PENDING = "pending",
+  RUNNING = "running",
+  COMPLETED = "completed",
+  FAILED = "failed",
+  EXPIRED = "expired",
+}
+
 // Task Interface
 export interface Task {
   id: string;
   type: TaskType;
   priority: TaskPriority;
-  sourceId?: string; // Where to get resource (if needed)
-  targetId: string; // Where to perform action
-  pos: RoomPosition; // Target position
-  amount?: number; // Amount of resource needed/transferring
-  creepsAssigned: string[]; // IDs of creeps assigned
-  maxCreeps: number; // Max concurrent creeps
+  status?: TaskStatus; // [FIX] Optional for registration
+  sourceId?: string;
+  targetId: string;
+  pos: RoomPosition;
+  amount?: number;
+  creepsAssigned: string[];
+  maxCreeps: number;
   requirements?: {
     bodyParts?: BodyPartConstant[];
     minEnergy?: number;
     minCapacity?: number;
   };
   creationTime: number;
-  expiryTime?: number; // When to drop task if not picked up
+  expiryTime?: number;
 
-  // [NEW] Stability & Prediction
-  locked?: boolean; // If true, do not reassign even if idle
-  sticky?: boolean; // If true, creep keeps this task until explicitly completed
-  estimatedDuration?: number; // Ticks
-  validRoles?: string[]; // Preferred roles
-  autoRemove?: boolean; // [NEW] Auto-delete on completion
+  // [NEW] Lifecycle & Error Tracking
+  lastUpdateTime?: number; // [FIX] Optional for registration
+  retries?: number;
+  errors?: string[]; // Error stacks
+
+  locked?: boolean;
+  sticky?: boolean;
+  estimatedDuration?: number;
+  validRoles?: string[];
+  autoRemove?: boolean;
 
   data?: any;
 }

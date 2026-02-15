@@ -36,7 +36,7 @@ Kernel.register("supreme", SupremeCommand); // [NEW] Strategic AI
 Kernel.register("economy", EconomyCenter); // [NEW]
 Kernel.register("defense", DefenseCenter); // [NEW]
 Kernel.register("spawn_center", SpawnCenter); // [NEW] Spawn Planning
-Kernel.register("dispatch", GlobalDispatch, "global"); // [NEW] Task Assignment
+Kernel.register("dispatch", GlobalDispatch); // [NEW] Task Assignment (Room Level)
 Kernel.register("datacenter", DataCenter, "global"); // [NEW] Data Center
 
 // 1. 核心逻辑 (人口 & 孵化) - 房间级别
@@ -65,12 +65,19 @@ creepsModule.register("remote_reserver", remoteReserver);
 creepsModule.register("remote_defender", remoteDefender);
 Kernel.register("creeps", creepsModule, "global");
 
-export const loop = function () {
-  // 运行内核
-  Kernel.run();
+import taskCleanup from "./utils/taskCleanup";
 
-  // 可选：定期打印内核统计报告
-  if (Game.time % 20 === 0) {
-    // console.log(Kernel.getReport());
+// 主循环
+export const loop = () => {
+  // [One-off] Cleanup Tasks if requested
+  if (Game.flags['cleanup']) {
+      taskCleanup.run();
+      Game.flags['cleanup'].remove();
   }
+
+  // 1. 内存清理与初始化
+  // ...
+
+  // 2. 运行内核
+  Kernel.run();
 };

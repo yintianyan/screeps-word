@@ -60,7 +60,21 @@ export default {
       });
 
       if (!target) {
-          target = creep.room.storage && creep.room.storage.store.getFreeCapacity(RESOURCE_ENERGY) > 0 ? creep.room.storage : null;
+          target = creep.pos.findClosestByRange(FIND_STRUCTURES, {
+            filter: (s) =>
+              s.structureType === STRUCTURE_TOWER &&
+              s.store.getFreeCapacity(RESOURCE_ENERGY) > 0,
+          });
+      }
+
+      if (!target) {
+        target = creep.pos.findClosestByRange(FIND_STRUCTURES, {
+          filter: (s) =>
+            s.structureType === STRUCTURE_CONTAINER &&
+            s.store.getFreeCapacity(RESOURCE_ENERGY) > 0 &&
+            (s.pos.findInRange(FIND_MY_SPAWNS, 3).length > 0 ||
+              (creep.room.controller && s.pos.inRangeTo(creep.room.controller, 3))),
+        });
       }
 
       if (target) {

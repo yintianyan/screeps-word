@@ -123,28 +123,7 @@ export class SpawnCenter {
   }
 
   private static processPopulationGaps(room: Room) {
-    // 获取目标和现状
-    // [Rule 3] Dynamic Load Balancing
-    // Recalculate targets based on detailed formula
-    // Harvester = ceil(Source*2 + Reserve/1000)
-    // If Reserve > 8000 -> 1.2 * Source
-    const sources = room.find(FIND_SOURCES).length;
-    const totalEnergy = room.memory.totalEnergy || 0;
-
-    // Override PopulationManager's logic partially or trust it?
-    // Let's implement the formula here to override 'harvester' target
-    let harvesterTarget = 0;
-    if (totalEnergy > 8000) {
-      harvesterTarget = Math.ceil(sources * 1.2);
-    } else {
-      harvesterTarget = Math.ceil(sources * 2 + totalEnergy / 1000);
-    }
-    // Cap at reasonable limit (e.g. 6) to avoid infinite growth
-    harvesterTarget = Math.min(harvesterTarget, 6);
-
     const targets = populationModule.calculateTargets(room);
-    // Apply override
-    targets.harvester = harvesterTarget;
 
     const currentCounts = {};
     const creeps = room.find(FIND_MY_CREEPS);
@@ -154,15 +133,43 @@ export class SpawnCenter {
       currentCounts[role] = (currentCounts[role] || 0) + 1;
     });
 
-    // 优先级顺序
-    // [Rule 4] Priority Queue Mapping
-    // CRITICAL: Defense (not handled here usually), Emergency
-    // HIGH: Upgrader (Energy < 300)
-    // MEDIUM: Harvester
-    // LOW: Builder
-    const rolePriority = ["harvester", "hauler", "upgrader", "builder"];
+    const roleList = Object.keys(targets).filter((r) => (targets[r] || 0) > 0);
 
-    for (const role of rolePriority) {
+    const tasks = Memory.dispatch?.tasks ? Object.values(Memory.dispatch.tasks) : [];
+    const roleToBestTaskPriority = new Map<string, TaskPriority>();
+    for (const t of tasks) {
+      if (!t || !t.validRoles || t.validRoles.length === 0) continue;
+      if (!t.creepsAssigned) t.creepsAssigned = [];
+      if (t.creepsAssigned.length >= t.maxCreeps) continue;
+      const role = t.validRoles[0];
+      const prev = roleToBestTaskPriority.get(role);
+      if (prev === undefined || t.priority < prev) roleToBestTaskPriority.set(role, t.priority);
+    }
+
+    const energyAvailable = room.energyAvailable;
+    const dynamicOrder = roleList
+      .map((role) => {
+        const target = targets[role] || 0;
+        const current = currentCounts[role] || 0;
+        const deficit = Math.max(0, target - current);
+        let priority: TaskPriority = TaskPriority.NORMAL;
+        if ((role === "harvester" || role === "hauler") && current === 0) {
+          priority = TaskPriority.CRITICAL;
+        } else {
+          const best = roleToBestTaskPriority.get(role);
+          if (best !== undefined) priority = best;
+          else if (role === "harvester") priority = TaskPriority.MEDIUM;
+          else if (role === "builder") priority = TaskPriority.LOW;
+          else if (role === "scout") priority = TaskPriority.IDLE;
+          else if (role === "upgrader" && energyAvailable < 300) priority = TaskPriority.HIGH;
+        }
+        return { role, priority, deficit };
+      })
+      .filter((x) => x.deficit > 0)
+      .sort((a, b) => a.priority - b.priority || b.deficit - a.deficit);
+
+    for (const item of dynamicOrder) {
+      const role = item.role;
       const target = targets[role] || 0;
       const current = currentCounts[role] || 0;
 
@@ -221,13 +228,8 @@ export class SpawnCenter {
         const newName =
           role.charAt(0).toUpperCase() + role.slice(1) + Game.time;
 
-        // [Rule 4] Priority Assignment
-        let priority = TaskPriority.NORMAL;
-        if (role === "harvester") priority = TaskPriority.MEDIUM; // As per rule 4 mapping
-        if (role === "upgrader" && room.energyAvailable < 300)
-          priority = TaskPriority.HIGH;
-        if (role === "builder") priority = TaskPriority.LOW;
-        if (current === 0) priority = TaskPriority.CRITICAL; // Survival overrides all
+        let priority = item.priority;
+        if (current === 0 && (role === "harvester" || role === "hauler")) priority = TaskPriority.CRITICAL;
 
         const task: SpawnTask = {
           id: `SPAWN_${newName}`,
@@ -286,7 +288,9 @@ export class SpawnCenter {
     creeps: Creep[],
   ): string {
     const sources = room.find(FIND_SOURCES);
-    const counts = {};
+    const counts: Record<string, number> = {};
+    
+    // Count existing creeps
     creeps
       .filter((c) => c.memory.role === "harvester")
       .forEach((c) => {
@@ -294,10 +298,30 @@ export class SpawnCenter {
           counts[c.memory.sourceId] = (counts[c.memory.sourceId] || 0) + 1;
       });
 
+    // Count queued creeps
+    const spawnQueue = Memory.dispatch.spawnQueue || [];
+    spawnQueue.forEach(task => {
+        if (task.roomName === room.name && task.role === "harvester" && task.memory && task.memory.sourceId) {
+             counts[task.memory.sourceId] = (counts[task.memory.sourceId] || 0) + 1;
+        }
+    });
+
     // 找没人挖的矿
     for (const source of sources) {
       if (!counts[source.id]) return source.id;
     }
-    return sources[0].id; // Fallback
+    
+    // Fallback: Return the one with minimum count
+    let minSource = sources[0];
+    let minCount = counts[sources[0].id] || 0;
+    
+    for (const source of sources) {
+        const count = counts[source.id] || 0;
+        if (count < minCount) {
+            minCount = count;
+            minSource = source;
+        }
+    }
+    return minSource.id;
   }
 }

@@ -26,7 +26,7 @@ describe("Data System", () => {
   beforeEach(() => {
     (global as any).Memory = {};
     room = {
-      name: "W1N1",
+      name: "W45N3",
       energyAvailable: 500,
       energyCapacityAvailable: 1000,
       storage: { store: { energy: 10000 } },
@@ -44,19 +44,19 @@ describe("Data System", () => {
 
     const snapshot = RoomCollector.run(room);
 
-    expect(snapshot.roomName).toBe("W1N1");
+    expect(snapshot.roomName).toBe("W45N3");
     expect(snapshot.energy.available).toBe(500);
     expect(snapshot.census["harvester"]).toBe(1);
     expect(snapshot.threat.level).toBe(0);
 
     // Verify Memory storage
-    expect((global as any).Memory.datastore.rooms["W1N1"]).toBeDefined();
+    expect((global as any).Memory.datastore.rooms["W45N3"]).toBeDefined();
   });
 
   test("AnomalyDetector should detect critical energy", () => {
     const snapshot: RoomSnapshot = {
       timestamp: 100,
-      roomName: "W1N1",
+      roomName: "W45N3",
       rcl: { level: 3, progress: 0, progressTotal: 0 },
       energy: { available: 50, capacity: 1000, storage: 0, terminal: 0 }, // 50 < 300
       resources: {} as any, // Cast to any to bypass strict type check for test

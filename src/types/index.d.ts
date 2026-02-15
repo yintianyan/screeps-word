@@ -54,7 +54,19 @@ declare global {
     log: any;
     watch: any;
     profiler: any;
-    config: any;
+    config: {
+        taskManager?: {
+            maxQueueLength: number;
+            maxRetry: number;
+            ttl: {
+                completed: number;
+                failed: number;
+                pending: number;
+            };
+            cleanupInterval: number;
+        };
+        [key: string]: any;
+    };
     stats: StatsMemory;
     lifecycle: any; // Add lifecycle
     dispatch: DispatchMemory; // [NEW] Global Dispatch Memory

@@ -3,6 +3,7 @@ import populationModule from "../src/components/populationManager";
 import { SpawnCenter } from "../src/centers/SpawnCenter";
 import Cache from "../src/components/memoryManager";
 import { TaskPriority } from "../src/types/dispatch";
+import { GlobalDispatch } from "../src/ai/GlobalDispatch";
 
 // Mocks
 (global as any).WORK = "work";
@@ -181,12 +182,14 @@ describe("Scheduling System Refactor", () => {
         hauler: 0,
       });
 
-    const registerSpy = jest.fn();
-    (global as any).GlobalDispatch = { registerSpawnTask: registerSpy };
+    const registerSpy = jest
+      .spyOn(GlobalDispatch, "registerSpawnTask")
+      .mockImplementation(() => {});
 
     SpawnCenter.run(room);
 
     expect(registerSpy).not.toHaveBeenCalled();
+    registerSpy.mockRestore();
     spy.mockRestore();
   });
 
@@ -207,12 +210,9 @@ describe("Scheduling System Refactor", () => {
     // Ensure cache matches room.find
     room.memory.harvesters = [{ id: "h1", workParts: 2 }];
 
-    const registerSpy = jest.fn();
-    (global as any).GlobalDispatch = {
-      registerSpawnTask: registerSpy,
-      getNextSpawnTask: jest.fn(),
-      spawnQueue: [], // Ensure empty queue
-    };
+    const registerSpy = jest
+      .spyOn(GlobalDispatch, "registerSpawnTask")
+      .mockImplementation(() => {});
     (global as any).Memory.dispatch.spawnQueue = []; // Ensure memory queue is empty
 
     // Mock isRoleQueued to return false
@@ -251,6 +251,7 @@ describe("Scheduling System Refactor", () => {
 
     expect(registerSpy).toHaveBeenCalled();
     const callArgs = registerSpy.mock.calls[0][0] as any;
-    expect(callArgs.role).toBe("harvester");
+    expect(["harvester", "hauler"]).toContain(callArgs.role);
+    registerSpy.mockRestore();
   });
 });

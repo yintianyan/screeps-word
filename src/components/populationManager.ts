@@ -1,6 +1,7 @@
 import Cache from "./memoryManager";
 import TaskManager from "./taskManager";
 import { EnergyManager, CrisisLevel } from "./EnergyManager";
+import { TaskPriority } from "../types/dispatch";
 
 const populationModule = {
   // === 配置区域 (Config) ===
@@ -12,9 +13,14 @@ const populationModule = {
     },
     // 角色上限
     limits: {
-      builder: 3,
-      upgrader: 3,
+      builder: 1,
+      upgrader: 1,
       hauler: 6,
+      scout: 1,
+      remote_harvester: 4,
+      remote_hauler: 4,
+      remote_reserver: 1,
+      remote_defender: 2,
     },
     // 部件限制
     partLimits: {
@@ -84,6 +90,11 @@ const populationModule = {
       upgrader: 0,
       builder: 0,
       hauler: 0,
+      scout: 0,
+      remote_harvester: 0,
+      remote_hauler: 0,
+      remote_reserver: 0,
+      remote_defender: 0,
     };
 
     const sources = Cache.getHeap(
@@ -166,15 +177,19 @@ const populationModule = {
 
     // Let's stick to the previous logic but modified by Crisis Level
 
-    // Base counts
-    targets.upgrader = 1;
-    targets.builder = 0;
+    const upgraderWorkBudget = EnergyManager.getBudget(room, "upgrader");
+    const builderWorkBudget = EnergyManager.getBudget(room, "builder");
 
-    // Builder Demand
-    if (tasks.construction.difficulty === "HIGH") targets.builder = 3;
-    else if (tasks.construction.difficulty === "MEDIUM") targets.builder = 2;
-    else if (tasks.construction.difficulty === "LOW") targets.builder = 1;
-    else if (tasks.repair.difficulty === "HIGH") targets.builder = 1;
+    const defaultWorkPerCreep = room.controller && room.controller.level >= 4 ? 5 : 3;
+
+    targets.upgrader = Math.max(0, Math.ceil(upgraderWorkBudget / defaultWorkPerCreep));
+    targets.builder = Math.max(0, Math.ceil(builderWorkBudget / defaultWorkPerCreep));
+
+    // Builder Demand (soft boost on top of budget)
+    if (tasks.construction.difficulty === "HIGH") targets.builder = Math.max(targets.builder, 3);
+    else if (tasks.construction.difficulty === "MEDIUM") targets.builder = Math.max(targets.builder, 2);
+    else if (tasks.construction.difficulty === "LOW") targets.builder = Math.max(targets.builder, 1);
+    else if (tasks.repair.difficulty === "HIGH") targets.builder = Math.max(targets.builder, 1);
 
     // Crisis Overrides
     if (level === CrisisLevel.CRITICAL) {
@@ -215,20 +230,70 @@ const populationModule = {
     targets.hauler = Math.min(targets.hauler, this.config.limits.hauler);
     if (targets.harvester > 0 && targets.hauler < 1) targets.hauler = 1;
 
-    // === 4. Tasks ===
+    if (
+      room.controller &&
+      room.controller.level >= 5 &&
+      EnergyManager.getLevel(room) !== CrisisLevel.CRITICAL
+    ) {
+      const sources = Cache.getHeap(
+        `sources_${room.name}`,
+        () => room.find(FIND_SOURCES),
+        1000,
+      ) as Source[];
+
+      const links = Cache.getTick(`links_${room.name}`, () =>
+        room.find(FIND_STRUCTURES, {
+          filter: (s) => s.structureType === STRUCTURE_LINK,
+        }),
+      ) as StructureLink[];
+
+      const spawns =
+        typeof FIND_MY_SPAWNS !== "undefined"
+          ? (Cache.getTick(`spawns_${room.name}`, () =>
+              room.find(FIND_MY_SPAWNS as any),
+            ) as StructureSpawn[])
+          : [];
+      const spawn = spawns[0];
+
+      const hubLinkExists = links.some(
+        (l) =>
+          (spawn && l.pos.inRangeTo(spawn, 4)) ||
+          (room.storage && l.pos.inRangeTo(room.storage, 2)),
+      );
+
+      let linkedSources = 0;
+      sources.forEach((src) => {
+        if (links.some((l) => l.pos.inRangeTo(src, 2))) linkedSources++;
+      });
+      const unlinkedSources = Math.max(0, sources.length - linkedSources);
+
+      if (hubLinkExists && linkedSources > 0) {
+        const cap = Math.min(3, 1 + (unlinkedSources > 0 ? 1 : 0));
+        targets.hauler = Math.max(1, Math.min(targets.hauler, cap));
+      }
+    }
+
+    // === 4. Tasks (priority-aware gap expansion) ===
     if (Memory.dispatch && Memory.dispatch.tasks) {
       for (const id in Memory.dispatch.tasks) {
         const task = Memory.dispatch.tasks[id];
         if (!task.creepsAssigned) task.creepsAssigned = [];
-        if (task.creepsAssigned.length < task.maxCreeps) {
-          if (task.validRoles && task.validRoles.length > 0) {
-            const role = task.validRoles[0];
-            targets[role] =
-              (targets[role] || 0) +
-              (task.maxCreeps - task.creepsAssigned.length);
-          }
-        }
+        if (!task.validRoles || task.validRoles.length === 0) continue;
+        if (task.creepsAssigned.length >= task.maxCreeps) continue;
+
+        // Only expand population for meaningful priorities, otherwise the queue can explode
+        if (task.priority > TaskPriority.HIGH) continue;
+        if (task.status && task.status !== "pending" && task.status !== "running") continue;
+
+        const role = task.validRoles[0];
+        targets[role] =
+          (targets[role] || 0) + (task.maxCreeps - task.creepsAssigned.length);
       }
+    }
+
+    // Final caps for extended roles
+    for (const role in this.config.limits) {
+      targets[role] = Math.min(targets[role] || 0, this.config.limits[role]);
     }
 
     return targets;
@@ -245,6 +310,32 @@ const populationModule = {
       1000,
     );
     const level = this.getEnergyLevel(room);
+    const rcl = room.controller?.level || 0;
+
+    const links =
+      rcl >= 5
+        ? (Cache.getTick(`links_${room.name}`, () =>
+            room.find(FIND_STRUCTURES, {
+              filter: (s) => s.structureType === STRUCTURE_LINK,
+            }),
+          ) as StructureLink[])
+        : [];
+
+    const spawns =
+      rcl >= 5 && typeof FIND_MY_SPAWNS !== "undefined"
+        ? (Cache.getTick(`spawns_${room.name}`, () =>
+            room.find(FIND_MY_SPAWNS as any),
+          ) as StructureSpawn[])
+        : [];
+    const spawn = spawns[0];
+
+    const hubLinkExists =
+      rcl >= 5 &&
+      links.some(
+        (l) =>
+          (spawn && l.pos.inRangeTo(spawn, 4)) ||
+          (room.storage && l.pos.inRangeTo(room.storage, 2)),
+      );
 
     // [Optimization] Throughput-based Calculation
     // 1. Estimate Hauler Body Capacity at current RCL
@@ -255,7 +346,18 @@ const populationModule = {
     const singleHaulerCapacity = maxSets * 50;
 
     // 2. Find Drop Point (Storage > Spawn)
-    const dropPoint = room.storage || room.find(FIND_MY_SPAWNS)[0];
+    let dropPoint: any = room.storage;
+    if (!dropPoint) {
+      try {
+        const spawns =
+          typeof FIND_MY_SPAWNS !== "undefined"
+            ? room.find(FIND_MY_SPAWNS as any)
+            : [];
+        dropPoint = spawns?.[0];
+      } catch {
+        dropPoint = undefined;
+      }
+    }
 
     // Global Boost for Idle Upgraders
     let globalBoost = 0;
@@ -289,16 +391,47 @@ const populationModule = {
         return;
       }
 
+      if (rcl >= 5 && hubLinkExists) {
+        const sourceLinked = links.some((l) => l.pos.inRangeTo(source, 2));
+        if (sourceLinked) {
+          needs[source.id] = 0;
+          return;
+        }
+      }
+
       // Calculate Distance (Cache it?)
       // Simple range is often enough, pathfinding is expensive.
       // Use Chebyshev distance (max(dx, dy)) as a heuristic.
       // Or Manhattan? Pathfinding is best but let's assume range * 1.5 for terrain.
       let distance = 25; // Default
       if (dropPoint) {
-        // Use cached path length if possible, or simple range
-        distance = source.pos.findPathTo(dropPoint, {
-          ignoreCreeps: true,
-        }).length;
+        const fromPos: any = source.pos;
+        const toPos: any = dropPoint.pos || dropPoint;
+
+        const cacheKey = `pathLen_${room.name}_${source.id}_${dropPoint.id || "drop"}`;
+        distance = Cache.getHeap(
+          cacheKey,
+          () => {
+            if (fromPos && typeof fromPos.findPathTo === "function") {
+              try {
+                return fromPos.findPathTo(toPos, { ignoreCreeps: true }).length;
+              } catch {
+                // fall through
+              }
+            }
+            if (fromPos && typeof fromPos.getRangeTo === "function") {
+              return fromPos.getRangeTo(toPos);
+            }
+            if (fromPos && toPos) {
+              return Math.max(
+                Math.abs((fromPos.x || 0) - (toPos.x || 0)),
+                Math.abs((fromPos.y || 0) - (toPos.y || 0)),
+              );
+            }
+            return 25;
+          },
+          1000,
+        );
       }
 
       // Throughput Formula:
@@ -442,8 +575,8 @@ const populationModule = {
       } else if (energyBudget >= 550) {
         return [WORK, WORK, WORK, WORK, CARRY, MOVE, MOVE]; // 4W 1C 2M (Cost 550)
       } else if (energyBudget >= 300) {
-        // 300-550 range: Procedural is fine, but ensure min 2 WORK if possible
-        // Fallthrough to procedural
+        // 300-550 range: Ensure min 2 WORK to pass Spawner validation
+        return [WORK, WORK, CARRY, MOVE]; // 2W 1C 1M (Cost 300)
       } else {
         // < 300 Energy
         // [Rule 1.3] Ban 1-WORK creeps unless emergency
@@ -462,6 +595,23 @@ const populationModule = {
     } else if (role === "remote_hauler") {
       // Remote Hauler: Max Carry + Move
       // 1 CARRY + 1 MOVE = 100
+      if (energyBudget >= 800)
+        return [
+          CARRY,
+          CARRY,
+          CARRY,
+          CARRY,
+          CARRY,
+          CARRY,
+          MOVE,
+          MOVE,
+          MOVE,
+          MOVE,
+          MOVE,
+          MOVE,
+        ];
+      if (energyBudget >= 600)
+        return [CARRY, CARRY, CARRY, CARRY, MOVE, MOVE, MOVE, MOVE];
     }
 
     // Procedural Generation with Scoring (Rule 5)
@@ -527,6 +677,7 @@ const populationModule = {
         grow: [TOUGH, ATTACK, MOVE, MOVE],
       },
       remote_reserver: { base: [CLAIM, MOVE], grow: [CLAIM, MOVE] },
+      remote_hauler: { base: [CARRY, CARRY, MOVE, MOVE], grow: [CARRY, MOVE] },
     };
 
     const config = configs[role] || configs.harvester;

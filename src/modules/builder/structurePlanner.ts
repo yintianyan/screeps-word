@@ -1,3 +1,5 @@
+import Cache from "../../components/memoryManager";
+
 const structurePlanner = {
   _cache: {} as any,
 
@@ -20,8 +22,13 @@ const structurePlanner = {
    * 1. 空间分析模块
    */
   analyzeRoom: function (room) {
-    const spawn = room.find(FIND_MY_SPAWNS)[0];
-    const sources = room.find(FIND_SOURCES);
+    const spawn = Cache.getTick(`spawn_${room.name}`, () => {
+      const spawns = room.find(FIND_MY_SPAWNS);
+      return spawns[0];
+    });
+    const sources = Cache.getTick(`sources_${room.name}`, () =>
+      room.find(FIND_SOURCES),
+    );
     const controller = room.controller;
 
     if (!spawn || !controller) return null;
@@ -86,7 +93,9 @@ const structurePlanner = {
     // 1. 全局工地数量检查 (Throttling)
     // 防止一次性铺设过多工地，导致 Builder 跑断腿且能量枯竭
     // 如果现有工地超过 10 个，暂停所有新规划
-    const existingSites = room.find(FIND_MY_CONSTRUCTION_SITES);
+    const existingSites = Cache.getTick(`my_sites_${room.name}`, () =>
+      room.find(FIND_MY_CONSTRUCTION_SITES),
+    );
     if (existingSites.length > 10) {
       return;
     }
@@ -466,7 +475,10 @@ const structurePlanner = {
 
     for (let index = 0; index < path.length; index++) {
       // 检查全局工地限制
-      if (room.find(FIND_MY_CONSTRUCTION_SITES).length > 10) break;
+      const sites = Cache.getTick(`my_sites_${room.name}`, () =>
+        room.find(FIND_MY_CONSTRUCTION_SITES),
+      );
+      if (sites.length > 10) break;
       if (sitesCreated >= maxNewSites) break;
 
       const step = path[index];

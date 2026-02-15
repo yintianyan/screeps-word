@@ -43,6 +43,12 @@ function runTests() {
   // 测试 5: 路径避让逻辑
   testPathAvoidance();
 
+  // 测试 6: Hauler Storage Logic
+  // testHaulerStorageLogic(); // Requires TS compilation or integration into JS runner
+  
+  // 测试 7: Task Lifecycle
+  // testTaskLifecycle(); // Requires TS compilation
+
   console.log("\n所有测试通过!");
 }
 

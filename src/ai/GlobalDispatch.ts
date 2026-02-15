@@ -1,12 +1,31 @@
 import {
-  DispatchMemory,
   Task,
   TaskPriority,
   TaskType,
   SpawnTask,
+  TaskStatus,
 } from "../types/dispatch";
 
+// [Config] Default Lifecycle Configuration
+const DEFAULT_CONFIG = {
+  maxQueueLength: 10000,
+  maxRetry: 3,
+  ttl: {
+    completed: 300, // 5 mins (at 1 tick/sec? No, Screeps tick is variable. Let's assume tick count.)
+    // Requirement says "5 minutes". In Screeps, 1 tick ~ 3s roughly? No, usually faster.
+    // Let's assume standard 3s/tick for estimation or just use Tick Count.
+    // 5 mins = 300 seconds. If tick = 3s, that's 100 ticks.
+    // If tick = 1s, that's 300 ticks.
+    // Let's use 500 ticks as a safe default for "5 minutes".
+    failed: 500,
+    pending: 1000, // 10 minutes ~ 1000 ticks? No, 10 mins is long.
+  },
+  cleanupInterval: 30, // 30 seconds ~ 10-15 ticks? Let's say 30 ticks.
+};
+
 export class GlobalDispatch {
+  private static lastCleanupTick = -1;
+
   static init() {
     if (!Memory.dispatch) {
       Memory.dispatch = {
@@ -15,7 +34,7 @@ export class GlobalDispatch {
         queues: {
           [TaskPriority.CRITICAL]: [],
           [TaskPriority.HIGH]: [],
-          [TaskPriority.MEDIUM]: [], // [NEW] Added MEDIUM
+          [TaskPriority.MEDIUM]: [],
           [TaskPriority.NORMAL]: [],
           [TaskPriority.LOW]: [],
           [TaskPriority.IDLE]: [],
@@ -23,13 +42,14 @@ export class GlobalDispatch {
         spawnQueue: [],
       };
     }
-    // [FIX] Ensure all queues exist (Migration for existing memory)
-    if (Memory.dispatch && Memory.dispatch.queues) {
-      if (!Memory.dispatch.queues[TaskPriority.MEDIUM]) {
-        Memory.dispatch.queues[TaskPriority.MEDIUM] = [];
-      }
+    
+    // Config Init
+    if (!Memory.config) Memory.config = {};
+    if (!Memory.config.taskManager) {
+        Memory.config.taskManager = DEFAULT_CONFIG;
     }
-    // General safety check for all priorities
+
+    // [FIX] Ensure all queues exist
     if (Memory.dispatch && Memory.dispatch.queues) {
       const priorities = [
         TaskPriority.CRITICAL,
@@ -49,19 +69,34 @@ export class GlobalDispatch {
     }
   }
 
-  static run(room: Room) {
+  static run(room?: Room) {
     try {
       this.init();
 
       // 1. Cleanup invalid tasks/assignments
-      this.cleanup();
+      // Run cleanup periodically
+      if (
+        Game.time % (Memory.config.taskManager.cleanupInterval || 30) === 0 &&
+        this.lastCleanupTick !== Game.time
+      ) {
+        this.lastCleanupTick = Game.time;
+        this.cleanup();
+      }
 
       // 2. Match tasks to idle creeps
-      this.dispatch(room);
+      if (room) {
+        this.dispatch(room);
+        return;
+      }
+
+      for (const roomName in Game.rooms) {
+        const r = Game.rooms[roomName];
+        if (!r.controller || !r.controller.my) continue;
+        this.dispatch(r);
+      }
     } catch (error) {
-      console.log(
-        `Error in GlobalDispatch.run for room ${room.name}: ${error}`,
-      );
+      const roomName = room?.name ? room.name : "GLOBAL";
+      console.log(`Error in GlobalDispatch.run for room ${roomName}: ${error}`);
       if (error instanceof Error && error.stack) {
         console.log(error.stack);
       }
@@ -70,8 +105,30 @@ export class GlobalDispatch {
 
   static registerTask(task: Task) {
     this.init();
+    
+    // Check Limits
+    const currentLength = Object.keys(Memory.dispatch.tasks).length;
+    const limit = Memory.config.taskManager.maxQueueLength || 10000;
+    if (currentLength >= limit) {
+        console.log(`[TaskPool] Queue Limit Reached (${currentLength}/${limit}). Triggering forced cleanup.`);
+        this.cleanup(true); // Force cleanup
+        // If still full, reject? Or just push anyway and hope cleanup worked.
+        // For robustness, we might reject low priority tasks here.
+        if (Object.keys(Memory.dispatch.tasks).length >= limit) {
+             console.log(`[TaskPool] Dropping task ${task.id} due to overflow.`);
+             return;
+        }
+    }
+
     if (Memory.dispatch.tasks[task.id]) return; // Already exists
 
+    // Initialize Lifecycle Fields
+    task.status = TaskStatus.PENDING;
+    task.creationTime = Game.time;
+    task.lastUpdateTime = Game.time;
+    task.retries = 0;
+    task.errors = [];
+    
     if (!task.creepsAssigned) task.creepsAssigned = [];
     Memory.dispatch.tasks[task.id] = task;
     Memory.dispatch.queues[task.priority].push(task.id);
@@ -102,10 +159,41 @@ export class GlobalDispatch {
     }
     return undefined;
   }
+  
+  static markTaskFailed(taskId: string, error: string) {
+      const task = this.getTask(taskId);
+      if (!task) return;
+      
+      task.status = TaskStatus.FAILED;
+      task.lastUpdateTime = Game.time;
+      if (!task.errors) task.errors = [];
+      task.errors.push(error);
+      task.retries = (task.retries || 0) + 1;
+      
+      const maxRetries = Memory.config.taskManager.maxRetry || 3;
+      
+      if (task.retries > maxRetries) {
+          console.log(`[TaskPool] Task ${taskId} failed max retries (${task.retries}). Removing.`);
+          this.deleteTask(taskId); // Remove completely or move to Dead Letter Queue?
+          // Requirement says "Force remove from pool"
+      } else {
+          // Reset to PENDING to retry? Or keep as FAILED until processed?
+          // If we assume a FAILED task needs manual intervention or re-dispatch:
+          // A "FAILED" task in queue might not be picked up if dispatch filters by status.
+          // Let's set it back to PENDING for retry, but keep the counter.
+          console.log(`[TaskPool] Task ${taskId} failed (Retry ${task.retries}/${maxRetries}). Re-queueing.`);
+          task.status = TaskStatus.PENDING;
+          // Ensure it's in the queue
+          const queue = Memory.dispatch.queues[task.priority];
+          if (!queue.includes(taskId)) queue.push(taskId);
+      }
+  }
 
   static getTask(taskId: string): Task | undefined {
     return Memory.dispatch?.tasks[taskId];
   }
+  
+  // ...
 
   static getAssignedTask(creep: Creep): Task | undefined {
     const taskId = Memory.dispatch?.assignments[creep.id];
@@ -145,13 +233,17 @@ export class GlobalDispatch {
     // Update task assignment list
     const task = this.getTask(taskId);
     if (task) {
+      // Mark Running if assigned?
+      // Actually completeTask implies "A creep finished its part".
+      
       if (!task.creepsAssigned) task.creepsAssigned = [];
       const idx = task.creepsAssigned.indexOf(creepId);
       if (idx > -1) {
         task.creepsAssigned.splice(idx, 1);
       }
+      
+      task.lastUpdateTime = Game.time;
 
-      // [NEW] Auto-delete task if configured or one-off type
       const autoRemoveTypes = [
         TaskType.PICKUP,
         TaskType.DELIVER,
@@ -162,61 +254,127 @@ export class GlobalDispatch {
       ];
 
       if (task.autoRemove || autoRemoveTypes.includes(task.type)) {
-        // Only delete if no other creeps are assigned (or maybe even if they are?)
-        // Usually these are 1-creep tasks. If multiple, we wait for all?
-        // Let's assume autoRemove means "when ONE creep finishes it, it's done"
-        // OR "when ALL assigned creeps finish"?
-        // For PICKUP/DELIVER, usually one creep completes the specific amount.
-        // For BUILD, it might take multiple trips.
-        // Let's rely on explicit `autoRemove` flag or specific logic.
-
-        // For now, if it's a "one-off" task and no creeps left assigned, delete it.
         if (task.creepsAssigned.length === 0) {
-          this.deleteTask(taskId);
+          task.status = TaskStatus.COMPLETED; // Mark completed
+          // If we want to keep history for a bit (TTL), don't delete immediately.
+          // But original logic was "deleteTask".
+          // Requirement says "Delete immediately if TTL exceeded".
+          // But if we delete NOW, we lose history.
+          // Requirement 2: "completed... > TTL... delete".
+          // So we should NOT delete here, just mark completed.
+          // However, for high throughput, keeping completed tasks is expensive memory-wise.
+          // Let's keep them for a short TTL (defined in config).
+          
+          // Remove from Queue (so it's not dispatched again)
+           const queue = Memory.dispatch.queues[task.priority];
+           const qIdx = queue.indexOf(taskId);
+           if (qIdx > -1) queue.splice(qIdx, 1);
+           
+           // If TTL is very short or 0, delete now.
+           // For now, let's just leave it in `tasks` map with COMPLETED status.
+           // Cleanup will handle it.
         }
       }
     }
   }
 
-  private static cleanup() {
+  private static cleanup(force: boolean = false) {
     if (!Memory.dispatch || !Memory.dispatch.assignments) return;
 
-    // Remove dead creeps from assignments
+    const start = Game.cpu.getUsed();
+    const config = Memory.config.taskManager;
+    const now = Game.time;
+    
+    let counts = { pending: 0, running: 0, completed: 0, failed: 0, expired: 0 };
+    let deleted = 0;
+    const initialSize = Object.keys(Memory.dispatch.tasks).length;
+
+    // 1. Assignment Cleanup (Dead Creeps)
     for (const creepId in Memory.dispatch.assignments) {
       if (!Game.creeps[creepId]) {
-        // Safe task cleanup
         const taskId = Memory.dispatch.assignments[creepId];
         if (taskId) {
-          this.completeTask(taskId, creepId);
+          // If creep died, task might have failed?
+          // Or just release assignment.
+          this.completeTask(taskId, creepId); // Release
+          // Optionally mark task as failed if it was critical?
         } else {
           delete Memory.dispatch.assignments[creepId];
         }
       }
     }
-    // Remove tasks that have expired (optional)
+
+    // 2. Task Pool Cleanup
+    const tasks = Memory.dispatch.tasks;
+    const ids = Object.keys(tasks);
+    
+    // Limits
+    const limit = config.maxQueueLength || 10000;
+    const needsForcePrune = force || ids.length > limit;
+
+    for (const id of ids) {
+        const task = tasks[id];
+        
+        // Update Status Count
+        if (task.status) counts[task.status] = (counts[task.status] || 0) + 1;
+        else counts['pending']++; // Default
+
+        let shouldDelete = false;
+
+        // A. TTL Check
+        if (task.status === TaskStatus.COMPLETED) {
+            if (now - task.lastUpdateTime > (config.ttl.completed || 300)) shouldDelete = true;
+        } else if (task.status === TaskStatus.FAILED) {
+            if (now - task.lastUpdateTime > (config.ttl.failed || 500)) shouldDelete = true;
+        } else if (task.status === TaskStatus.PENDING || task.status === undefined) {
+             // Max Wait Time
+             if (now - task.creationTime > (config.ttl.pending || 1500)) {
+                 task.status = TaskStatus.EXPIRED;
+                 shouldDelete = true; // Mark expired then delete? Or keep for a bit?
+                 // Requirement: "Mark expired AND delete" (implied delete soon or immediately?)
+                 // "Mark as expired and delete" usually means log it then delete.
+             }
+        }
+        
+        // B. Force Prune Strategy (if over limit)
+        if (!shouldDelete && needsForcePrune) {
+            // Prioritize removing Expired > Failed > Completed > Pending (Oldest)
+            // This loop is simple iteration, tough to prioritize globally without sort.
+            // But we can be aggressive on "Old" tasks.
+            if (task.status === TaskStatus.EXPIRED || task.status === TaskStatus.FAILED || task.status === TaskStatus.COMPLETED) {
+                shouldDelete = true;
+            } else if (now - task.creationTime > 2000) {
+                // Very old pending
+                shouldDelete = true;
+            }
+        }
+
+        if (shouldDelete) {
+            this.deleteTask(id);
+            deleted++;
+        }
+    }
+
+    // 3. Observability Log
+    const end = Game.cpu.getUsed();
+    console.log(`[TaskPool] Cleanup: Initial=${initialSize} | Deleted=${deleted} | Remaining=${initialSize - deleted} | Time=${(end - start).toFixed(2)}ms`);
+    console.log(`[TaskPool] Stats: Pending=${counts.pending} Run=${counts.running} Done=${counts.completed} Fail=${counts.failed}`);
   }
 
   private static dispatch(room: Room) {
-    if (
-      !Memory.dispatch ||
-      !Memory.dispatch.assignments ||
-      !Memory.dispatch.queues
-    )
-      return;
+    // ... (Keep existing dispatch logic but check status)
+    if (!Memory.dispatch || !Memory.dispatch.assignments || !Memory.dispatch.queues) return;
 
-    // Find idle creeps in this room
-    // [Optimization] Only dispatch to idle creeps OR creeps with low priority tasks if CRITICAL task exists
     const idleCreeps = room.find(FIND_MY_CREEPS, {
       filter: (c) => !Memory.dispatch.assignments[c.id] && !c.spawning,
     });
 
     if (idleCreeps.length === 0) return;
 
-    // Iterate priorities
     const priorities = [
       TaskPriority.CRITICAL,
       TaskPriority.HIGH,
-      TaskPriority.MEDIUM, // [NEW] Added MEDIUM
+      TaskPriority.MEDIUM,
       TaskPriority.NORMAL,
       TaskPriority.LOW,
       TaskPriority.IDLE,
@@ -226,51 +384,53 @@ export class GlobalDispatch {
       const queue = Memory.dispatch.queues[priority] || [];
       if (queue.length === 0) continue;
 
-      // [Optimization] Sort tasks within the same priority!
-      // This is crucial. If we have multiple HIGH priority pickup tasks,
-      // we want the one with MORE energy to be processed first.
-
-      // Let's sort the queue based on data.amount if available (descending)
-      // Only sort if it's likely to be a transport queue (HIGH/NORMAL)
+      // Sort logic ... (Keep existing)
       if (priority === TaskPriority.HIGH || priority === TaskPriority.NORMAL) {
         queue.sort((idA, idB) => {
           const taskA = Memory.dispatch.tasks[idA];
           const taskB = Memory.dispatch.tasks[idB];
           const amountA = taskA?.data?.amount || 0;
           const amountB = taskB?.data?.amount || 0;
-          return amountB - amountA; // Descending
+          return amountB - amountA; 
         });
       }
 
-      // Try to assign tasks in this queue
       for (let i = 0; i < queue.length; i++) {
         const taskId = queue[i];
         if (!Memory.dispatch.tasks) {
-          queue.splice(i, 1);
-          i--;
-          continue;
+           queue.splice(i, 1); i--; continue;
         }
         const task = Memory.dispatch.tasks[taskId];
 
-        // Cleanup invalid tasks
         if (!task) {
           queue.splice(i, 1);
           i--;
           continue;
         }
+        
+        // [NEW] Skip if not PENDING (e.g. Completed but waiting cleanup)
+        // Actually, running tasks might need more creeps?
+        // If status is COMPLETED or FAILED or EXPIRED, remove from queue
+        if (task.status === TaskStatus.COMPLETED || task.status === TaskStatus.FAILED || task.status === TaskStatus.EXPIRED) {
+             queue.splice(i, 1);
+             i--;
+             continue;
+        }
 
-        // Check if task needs more creeps
         if (!task.creepsAssigned) task.creepsAssigned = [];
         if (task.creepsAssigned.length >= task.maxCreeps) continue;
 
-        // Find best creep
         const bestCreep = this.findBestCreep(idleCreeps, task);
         if (bestCreep) {
-          // Assign
           Memory.dispatch.assignments[bestCreep.id] = task.id;
           task.creepsAssigned.push(bestCreep.id);
+          
+          // Update Status
+          if (task.status === TaskStatus.PENDING) {
+              task.status = TaskStatus.RUNNING;
+              task.lastUpdateTime = Game.time;
+          }
 
-          // Remove from idle list
           const index = idleCreeps.indexOf(bestCreep);
           idleCreeps.splice(index, 1);
 
@@ -280,51 +440,38 @@ export class GlobalDispatch {
     }
   }
 
+  // ... (findBestCreep remains same)
   private static findBestCreep(creeps: Creep[], task: Task): Creep | null {
-    // Filter by capability
+     // ... (Copy existing implementation from Read result)
     const candidates = creeps.filter((c) => {
-      // 0. Check Role Preference
       if (task.validRoles && task.validRoles.length > 0) {
         if (!task.validRoles.includes(c.memory.role)) return false;
       }
-
-      // 1. Check Body Requirements
       if (task.requirements?.bodyParts) {
         const hasParts = task.requirements.bodyParts.every(
           (part) => c.getActiveBodyparts(part) > 0,
         );
         if (!hasParts) return false;
       }
-
-      // 2. Check Capacity
       if (task.requirements?.minCapacity) {
         if (c.store.getCapacity() < task.requirements.minCapacity) return false;
       }
-
-      // 3. Check Lifespan (Predictive)
       if (task.estimatedDuration && c.ticksToLive) {
-        // Need at least enough life to reach target + do task
         const range = c.pos.getRangeTo(task.pos);
         if (c.ticksToLive < range + task.estimatedDuration) return false;
       }
-
       return true;
     });
 
     if (candidates.length === 0) return null;
 
-    // Sort by Score (Distance + Role Match + Energy Weight)
     return candidates.sort((a, b) => {
-      // 1. Role Match (Primary)
       const roleMatchA = task.validRoles?.includes(a.memory.role) ? 100 : 0;
       const roleMatchB = task.validRoles?.includes(b.memory.role) ? 100 : 0;
-
-      // 2. Distance Score (Lower is better)
       const distA = a.pos.getRangeTo(task.pos);
       const distB = b.pos.getRangeTo(task.pos);
-      const distScoreA = Math.max(0, 50 - distA); // 50 points for distance 0
+      const distScoreA = Math.max(0, 50 - distA); 
       const distScoreB = Math.max(0, 50 - distB);
-
       return roleMatchB + distScoreB - (roleMatchA + distScoreA);
     })[0];
   }

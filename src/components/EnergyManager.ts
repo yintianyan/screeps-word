@@ -197,8 +197,9 @@ export class EnergyManager {
     const rcl = room.controller.level;
     const config = DEFAULT_CONFIG[rcl] || DEFAULT_CONFIG[0];
 
-    // Calculate Total Stored Energy
+    // Calculate Total Stored Energy & Capacity
     let totalEnergy = room.energyAvailable;
+    let totalCapacity = room.energyCapacityAvailable;
 
     // Add Containers
     const containers = Cache.getStructures(
@@ -209,33 +210,54 @@ export class EnergyManager {
       (sum, c) => sum + c.store[RESOURCE_ENERGY],
       0,
     );
+    totalCapacity += containers.reduce(
+        (sum, c) => sum + c.store.getCapacity(RESOURCE_ENERGY), 0
+    );
 
     // Add Storage
     if (room.storage) {
       totalEnergy += room.storage.store[RESOURCE_ENERGY];
+      totalCapacity += room.storage.store.getCapacity(RESOURCE_ENERGY);
     }
 
-    // Add Terminal (Optional, usually for trading, but counts as asset)
+    // Add Terminal
     if (room.terminal) {
       totalEnergy += room.terminal.store[RESOURCE_ENERGY];
+      totalCapacity += room.terminal.store.getCapacity(RESOURCE_ENERGY);
     }
+    
+    // Add Links
+    // Links are not cached in getStructures usually, find them
+    const links = room.find(FIND_MY_STRUCTURES, { filter: s => s.structureType === STRUCTURE_LINK }) as StructureLink[];
+    totalEnergy += links.reduce((sum, l) => sum + l.store[RESOURCE_ENERGY], 0);
+    totalCapacity += links.reduce((sum, l) => sum + l.store.getCapacity(RESOURCE_ENERGY), 0);
+
+    // Calculate Percentage
+    const percentage = totalCapacity > 0 ? totalEnergy / totalCapacity : 0;
 
     // Determine Level
-    // Hysteresis: If previous level exists, use buffer to avoid flickering?
-    // Simplified for now: Direct mapping
-
+    // Logic: Combine Absolute Thresholds (Early Game) and Percentage (Late Game)
+    
     let level = CrisisLevel.NONE;
-
+    
+    // Absolute Floors (Safety Net)
     if (totalEnergy < config.crisisThreshold) {
       level = CrisisLevel.CRITICAL;
-    } else if (totalEnergy < config.minEnergy * 0.3) {
-      level = CrisisLevel.HIGH;
-    } else if (totalEnergy < config.minEnergy * 0.6) {
-      level = CrisisLevel.MEDIUM;
-    } else if (totalEnergy < config.minEnergy) {
-      level = CrisisLevel.LOW;
+    } 
+    // Percentage Based Logic
+    else if (percentage < 0.05) { // < 5%
+        level = CrisisLevel.HIGH;
+    } else if (percentage < 0.15) { // < 15%
+        level = CrisisLevel.MEDIUM;
+    } else if (percentage < 0.30) { // < 30%
+        level = CrisisLevel.LOW;
     } else {
-      level = CrisisLevel.NONE;
+        // Also check absolute minEnergy to avoid "100% full but only 300 cap" issues in early game
+        if (totalEnergy < config.minEnergy) {
+            level = CrisisLevel.LOW;
+        } else {
+            level = CrisisLevel.NONE;
+        }
     }
 
     // Save to Memory

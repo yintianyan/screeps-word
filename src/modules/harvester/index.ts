@@ -22,30 +22,40 @@ export default class Harvester extends Role {
     } else {
       // 2. Transfer (Full)
       // Check for Link/Container nearby
-      const link = source.pos.findInRange(FIND_STRUCTURES, 2, {
-        filter: (s) =>
-          s.structureType === STRUCTURE_LINK &&
-          (s as StructureLink).store.getFreeCapacity(RESOURCE_ENERGY) > 0,
-      })[0];
-
-      if (link) {
-        if (this.creep.transfer(link, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-          this.move(link);
-        }
-        return;
-      }
-
       const container = source.pos.findInRange(FIND_STRUCTURES, 1, {
         filter: (s) =>
           s.structureType === STRUCTURE_CONTAINER &&
           (s as StructureContainer).store.getFreeCapacity(RESOURCE_ENERGY) > 0,
       })[0];
 
+      const link = source.pos.findInRange(FIND_STRUCTURES, 2, {
+        filter: (s) =>
+          s.structureType === STRUCTURE_LINK &&
+          (s as StructureLink).store.getFreeCapacity(RESOURCE_ENERGY) > 0,
+      })[0];
+
+      const containerNearFull =
+        container &&
+        (container as StructureContainer).store.getFreeCapacity(
+          RESOURCE_ENERGY,
+        ) < this.creep.store.getUsedCapacity(RESOURCE_ENERGY);
+
+      if (link && (containerNearFull || this.creep.pos.inRangeTo(link, 1))) {
+        if (this.creep.transfer(link, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
+          this.move(link);
+        }
+        return;
+      }
+
       if (container) {
         if (
           this.creep.transfer(container, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE
         ) {
           this.move(container);
+        }
+      } else if (link) {
+        if (this.creep.transfer(link, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
+          this.move(link);
         }
       } else {
         // Fallback: Drop mining or wait for Hauler

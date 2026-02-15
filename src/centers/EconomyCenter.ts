@@ -10,6 +10,7 @@ export class EconomyCenter {
 
     this.generateHarvestTasks(room);
     this.generateTransportTasks(room);
+    this.generateRefillTasks(room);
     this.generateActiveDeliveryTasks(room); // [NEW]
     this.generateBuildTasks(room);
     this.generateUpgradeTasks(room);
@@ -190,6 +191,72 @@ export class EconomyCenter {
         data: { resource: RESOURCE_ENERGY, amount: res.amount },
       });
     });
+  }
+
+  private static generateRefillTasks(room: Room) {
+    const spawnsAndExts = room.find(FIND_MY_STRUCTURES, {
+      filter: (s) =>
+        (s.structureType === STRUCTURE_SPAWN ||
+          s.structureType === STRUCTURE_EXTENSION) &&
+        s.store.getFreeCapacity(RESOURCE_ENERGY) > 0,
+    }) as AnyStoreStructure[];
+
+    const towers = room.find(FIND_MY_STRUCTURES, {
+      filter: (s) =>
+        s.structureType === STRUCTURE_TOWER &&
+        s.store.getFreeCapacity(RESOURCE_ENERGY) > 0 &&
+        s.store[RESOURCE_ENERGY] < 500,
+    }) as AnyStoreStructure[];
+
+    const spawnExtPriority =
+      room.energyAvailable < room.energyCapacityAvailable * 0.5
+        ? TaskPriority.CRITICAL
+        : TaskPriority.HIGH;
+
+    let created = 0;
+    for (const s of spawnsAndExts) {
+      if (created >= 12) break;
+      const taskId = `REFILL_${s.id}`;
+      if (GlobalDispatch.getTask(taskId)) continue;
+      GlobalDispatch.registerTask({
+        id: taskId,
+        type: TaskType.TRANSFER,
+        priority: spawnExtPriority,
+        targetId: s.id,
+        pos: s.pos,
+        maxCreeps: 1,
+        creepsAssigned: [],
+        requirements: { bodyParts: [CARRY], minCapacity: 50 },
+        validRoles: ["hauler"],
+        estimatedDuration: 20,
+        creationTime: Game.time,
+        autoRemove: true,
+        data: { resource: RESOURCE_ENERGY },
+      } as any);
+      created++;
+    }
+
+    for (const t of towers) {
+      if (created >= 18) break;
+      const taskId = `REFILL_${t.id}`;
+      if (GlobalDispatch.getTask(taskId)) continue;
+      GlobalDispatch.registerTask({
+        id: taskId,
+        type: TaskType.TRANSFER,
+        priority: TaskPriority.HIGH,
+        targetId: t.id,
+        pos: t.pos,
+        maxCreeps: 1,
+        creepsAssigned: [],
+        requirements: { bodyParts: [CARRY], minCapacity: 50 },
+        validRoles: ["hauler"],
+        estimatedDuration: 20,
+        creationTime: Game.time,
+        autoRemove: true,
+        data: { resource: RESOURCE_ENERGY },
+      } as any);
+      created++;
+    }
   }
 
   // [NEW] Active Delivery Logic

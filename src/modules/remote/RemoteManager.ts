@@ -22,6 +22,11 @@ export class RemoteManager {
     // Only run if we have remotes or need to scout
     // 1. Discovery (Scout neighbors if RCL >= 2)
     if (room.controller && room.controller.level >= 2) {
+      // Force scouting if no remotes are present to ensure we find some
+      if (!room.memory.remotes || room.memory.remotes.length === 0) {
+          if (!room.memory.scout) room.memory.scout = { lastScan: 0, status: 'pending' };
+          room.memory.scout.status = 'pending';
+      }
       this.manageScouting(room);
     }
 
@@ -44,6 +49,11 @@ export class RemoteManager {
       room.memory.scout.status = "pending";
     }
 
+    // [Fix] If we have pending scout tasks, don't generate more
+    // Check GlobalDispatch for existing SCOUT tasks for this room
+    // Actually, manageScouting generates tasks based on exits. 
+    // If tasks exist but creep not spawning, it might be population limit or priority.
+    
     if (room.memory.scout.status === "pending") {
       const exits = Game.map.describeExits(room.name);
       if (!exits) return;
@@ -51,6 +61,14 @@ export class RemoteManager {
       // Generate scout tasks for unknown rooms
       for (const dir in exits) {
         const targetRoom = exits[dir as any];
+        
+        // [NEW] Evaluation Logic
+        // If we have vision, check if it's a good remote
+        const visibleRoom = Game.rooms[targetRoom];
+        if (visibleRoom) {
+            this.evaluateRemote(room, visibleRoom);
+        }
+
         // If we don't have memory of this room or it's old
         if (!Memory.rooms[targetRoom]) {
           const taskId = `scout_${targetRoom}`;
@@ -75,6 +93,44 @@ export class RemoteManager {
       room.memory.scout.lastScan = Game.time;
       room.memory.scout.status = "active"; // Tasks dispatched
     }
+  }
+
+  private static evaluateRemote(homeRoom: Room, remoteRoom: Room) {
+    // 1. Check if already in list
+    if (!homeRoom.memory.remotes) homeRoom.memory.remotes = [];
+    if (homeRoom.memory.remotes.includes(remoteRoom.name)) return;
+
+    // 2. Check Suitability
+    const sources = remoteRoom.find(FIND_SOURCES);
+    if (sources.length === 0) return; // Useless
+
+    // Check ownership
+    if (remoteRoom.controller) {
+        if (remoteRoom.controller.owner) return; // Occupied
+        if (remoteRoom.controller.reservation && 
+            remoteRoom.controller.reservation.username !== "Invader" && 
+            remoteRoom.controller.reservation.username !== homeRoom.controller?.owner?.username) {
+            return; // Reserved by others
+        }
+    }
+
+    // Check Invader Core
+    const cores = remoteRoom.find(FIND_HOSTILE_STRUCTURES, {
+        filter: (s) => s.structureType === STRUCTURE_INVADER_CORE
+    });
+    // If Stronghold (level > 0), avoid for now. 
+    // Actually FIND_HOSTILE_STRUCTURES covers it. 
+    // We can handle small cores, but maybe skip for now to be safe.
+    if (cores.length > 0) return; 
+
+    // 3. Distance Check (Manhattan/Chebyshev is rough, Path is better)
+    // Only accept neighbors (distance 1) for now
+    const dist = Game.map.getRoomLinearDistance(homeRoom.name, remoteRoom.name);
+    if (dist > 1) return;
+
+    // 4. Add to Remotes
+    console.log(`[RemoteManager] 🏳️ Colonizing ${remoteRoom.name} from ${homeRoom.name} (${sources.length} Sources)`);
+    homeRoom.memory.remotes.push(remoteRoom.name);
   }
 
   private static manageRemoteRoom(homeRoom: Room, remoteName: string) {
