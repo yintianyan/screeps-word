@@ -7,23 +7,28 @@ export default class Task {
   basePriority: number;
   data: any;
 
+  validRoles?: string[];
+
   /**
    * @param {string} type
    * @param {string} targetId
    * @param {number} priority
    * @param {Object} [data]
+   * @param {string[]} [validRoles]
    */
   constructor(
     type: string,
     targetId: string,
     priority = config.PRIORITY.LOW,
     data = {},
+    validRoles?: string[],
   ) {
     this.id = `${type}_${targetId}_${Game.time}`;
     this.type = type;
     this.targetId = targetId;
     this.basePriority = priority;
     this.data = data;
+    this.validRoles = validRoles;
   }
 
   /**
@@ -32,6 +37,11 @@ export default class Task {
    * @returns {number}
    */
   getScore(creep: Creep): number {
+    // 0. Role Check
+    if (this.validRoles && this.validRoles.length > 0) {
+      if (!this.validRoles.includes(creep.memory.role)) return -Infinity;
+    }
+
     const target = Game.getObjectById(this.targetId as Id<any>);
     if (!target) return -1; // Invalid target
 

@@ -1,4 +1,4 @@
-import { DispatchMemory } from "./dispatch";
+import { DispatchMemory, LifecycleMemory } from "./dispatch";
 
 declare global {
   // Memory extension samples
@@ -68,7 +68,7 @@ declare global {
         [key: string]: any;
     };
     stats: StatsMemory;
-    lifecycle: any; // Add lifecycle
+    lifecycle: LifecycleMemory; // [FIX] Strict type
     dispatch: DispatchMemory; // [NEW] Global Dispatch Memory
     datastore: import("./stats").DataStore; // [NEW] Data Center
     _logFlood: any;
@@ -97,6 +97,12 @@ declare global {
       };
     };
     [key: string]: any;
+  }
+
+  interface Room {
+    _laneMatrices?: any;
+    _populationTargets?: Record<string, number>;
+    _populationTargetsTick?: number;
   }
 
   namespace NodeJS {

@@ -1,6 +1,8 @@
 import { GlobalDispatch } from "../ai/GlobalDispatch";
-import { TaskPriority, TaskType } from "../types/dispatch";
-import { EnergyManager, CrisisLevel } from "../components/EnergyManager";
+import { Task, TaskPriority, TaskType } from "../types/dispatch";
+// import { EnergyManager, CrisisLevel } from "../components/EnergyManager"; // Removed unused import
+import StructureCache from "../utils/structureCache";
+import config from "../config/constants";
 
 export class DefenseCenter {
   static run(room: Room) {

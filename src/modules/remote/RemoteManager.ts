@@ -1,6 +1,7 @@
+// import Cache from "../../components/memoryManager"; // Removed unused import
 import { GlobalDispatch } from "../../ai/GlobalDispatch";
-import { TaskPriority, TaskType } from "../../types/dispatch";
-import Cache from "../../components/memoryManager";
+import { Task, TaskPriority, TaskType } from "../../types/dispatch";
+import config from "../../config/constants";
 
 export class RemoteManager {
   static run(room: Room) {
@@ -271,7 +272,7 @@ export class RemoteManager {
       // Hauler Task
       // [Optimization] Calculate throughput requirement
       // Distance estimation
-      const distance =
+      const _distance =
         Game.map.getRoomLinearDistance(homeRoom.name, remoteName) * 50;
       // Rough estimate, can be improved with pathfinder cache
 

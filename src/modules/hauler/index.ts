@@ -69,240 +69,19 @@ export default class Hauler extends Role {
   executeState() {
     if (this.memory.working) {
       // === DELIVER STATE ===
-      const energyLevel = this.creep.room.memory.energyLevel || "LOW";
-
-      // Candidate List
-      interface Candidate {
-        target: Structure | Creep;
-        priority: number;
-        type: string;
-        pos: RoomPosition;
-        visual: { stroke: string; opacity?: number; strokeWidth?: number };
-      }
-      const candidates: Candidate[] = [];
-
-      // 1. Brain Task (Spawn/Extension)
-      // Usually High Priority (200)
-      const brain = new Brain(this.creep.room);
-      brain.analyze();
-      brain.generateTasks();
+      const brain = Brain.getInstance(this.creep.room);
       const task = brain.getBestTask(this.creep);
 
-      // [Optimization] Brain task integration
-      // Brain logic might return "transfer_spawn" or others.
-      // If we are in CRITICAL mode, we MUST prioritize Spawn/Ext.
-      // If Brain returns something else (e.g. build), we might ignore it if CRITICAL.
-      
-      if (task && task.type === "transfer_spawn") {
-        const target = Game.getObjectById(task.targetId as Id<Structure>);
+      if (task) {
+        const target = Game.getObjectById(task.targetId as Id<any>);
         if (target) {
-          candidates.push({
-            target: target,
-            priority: 200,
-            type: "spawn_ext",
-            pos: target.pos,
-            visual: { stroke: "#ffffff" },
-          });
-        }
-      }
-
-      // If CRITICAL, we only care about Spawn/Extensions.
-      // But if Brain didn't find them (maybe due to logic), we scan manually to be safe.
-      if (energyLevel === "CRITICAL" || candidates.length === 0) {
-        const extensions = this.creep.room.find(FIND_MY_STRUCTURES, {
-          filter: (s) =>
-            (s.structureType === STRUCTURE_SPAWN ||
-              s.structureType === STRUCTURE_EXTENSION) &&
-            s.store.getFreeCapacity(RESOURCE_ENERGY) > 0,
-        });
-        extensions.forEach((ext) => {
-          // Avoid duplicates if Brain already found it
-          if (!candidates.find((c) => c.target.id === ext.id)) {
-            candidates.push({
-              target: ext,
-              priority: 200,
-              type: "spawn_ext",
-              pos: ext.pos,
-              visual: { stroke: "#ffffff" },
-            });
-          }
-        });
-        
-      }
-
-      // 1.5 Source Links - Priority 190 (High Priority to clear containers)
-      const sourceLinks = this.creep.room.find(FIND_MY_STRUCTURES, {
-          filter: (s) => s.structureType === STRUCTURE_LINK && 
-                         s.store.getFreeCapacity(RESOURCE_ENERGY) > 0 &&
-                         this.creep.room.find(FIND_SOURCES).some(src => s.pos.inRangeTo(src, 2))
-      });
-      sourceLinks.forEach(link => {
-          candidates.push({
-              target: link,
-              priority: 190,
-              type: "source_link",
-              pos: link.pos,
-              visual: { stroke: "#0000ff" }
-          });
-      });
-
-      // If NOT CRITICAL, add other targets
-      if (energyLevel !== "CRITICAL") {
-        // 2. Priority Builders (Tag: priorityRequest) - Priority 150
-        const priorityBuilders = this.creep.room.find(FIND_MY_CREEPS, {
-          filter: (c) =>
-            c.memory.role === "builder" && c.memory.priorityRequest,
-        });
-        priorityBuilders.forEach((b) => {
-          candidates.push({
-            target: b,
-            priority: 150,
-            type: "priority_builder",
-            pos: b.pos,
-            visual: { stroke: "#ff00ff", strokeWidth: 0.5 }, // Magenta
-          });
-        });
-
-        // 3. Towers - Priority 120
-        const towers = this.creep.room.find(FIND_STRUCTURES, {
-          filter: (s) =>
-            s.structureType === STRUCTURE_TOWER &&
-            s.store.getFreeCapacity(RESOURCE_ENERGY) > 100,
-        });
-        towers.forEach((t) => {
-          candidates.push({
-            target: t,
-            priority: 120,
-            type: "tower",
-            pos: t.pos,
-            visual: { stroke: "#ff0000" },
-          });
-        });
-
-        // 4. Upgraders (Active) - Priority 100
-        const needyUpgraders = this.creep.room.find(FIND_MY_CREEPS, {
-          filter: (c) =>
-            c.memory.role === "upgrader" &&
-            (c.memory.working || c.memory.requestingEnergy) &&
-            c.store.getFreeCapacity(RESOURCE_ENERGY) >
-              c.store.getCapacity() * 0.5,
-        });
-        needyUpgraders.forEach((u) => {
-          candidates.push({
-            target: u,
-            priority: 100,
-            type: "upgrader",
-            pos: u.pos,
-            visual: { stroke: "#00ff00", opacity: 0.5 },
-          });
-        });
-
-        // 5. Builders (Standard) - Priority 80
-        const needyBuilders = this.creep.room.find(FIND_MY_CREEPS, {
-          filter: (c) =>
-            c.memory.role === "builder" &&
-            (c.memory.working || c.memory.requestingEnergy) &&
-            c.store[RESOURCE_ENERGY] < c.store.getCapacity() * 0.3,
-        });
-        needyBuilders.forEach((b) => {
-          // Avoid double adding if it was priority
-          if (!candidates.find((c) => c.target.id === b.id)) {
-            candidates.push({
-              target: b,
-              priority: 80,
-              type: "builder",
-              pos: b.pos,
-              visual: { stroke: "#ffff00", opacity: 0.5 },
-            });
-          }
-        });
-
-        // 6. Sink Containers - Priority 50
-        const sources = this.creep.room.find(FIND_SOURCES);
-        const sinkContainers = this.creep.room.find(FIND_STRUCTURES, {
-          filter: (s) => {
-            if (s.structureType !== STRUCTURE_CONTAINER) return false;
-            if (s.store.getFreeCapacity(RESOURCE_ENERGY) === 0) return false;
-
-            // Filter out Source Containers (Range <= 2)
-            for (const source of sources) {
-              if (s.pos.inRangeTo(source, 2)) return false;
-            }
-
-            // Check if near Controller (Range 3) or Spawn (Range 3)
-            const nearController =
-              this.creep.room.controller &&
-              s.pos.inRangeTo(this.creep.room.controller, 3);
-            const nearSpawn = s.pos.findInRange(FIND_MY_SPAWNS, 3).length > 0;
-
-            return nearController || nearSpawn;
-          },
-        });
-        const cacheTarget =
-          (this.creep.room.controller?.level || 1) < 4 ? 1500 : 5000;
-        sinkContainers
-          .filter((s) => (s as AnyStoreStructure).store[RESOURCE_ENERGY] < cacheTarget)
-          .forEach((s) => {
-          candidates.push({
-            target: s,
-            priority: 50,
-            type: "container",
-            pos: s.pos,
-            visual: { stroke: "#00ffff" },
-          });
-        });
-
-      }
-
-      // === SCORING & SELECTION ===
-      if (candidates.length > 0) {
-        // Score = Priority - Distance
-        // This allows a closer lower priority target to win if the difference is large enough,
-        // BUT since our priority gaps are large (20-30 points), it mostly respects priority tiers
-        // unless the distance difference is extreme.
-        const bestCandidate = candidates.reduce(
-          (best, current) => {
-            const dist = this.creep.pos.getRangeTo(current.pos);
-            const score = current.priority - dist * 1.0; // Distance Penalty Factor 1.0
-
-            if (!best || score > best.score) {
-              return { candidate: current, score: score };
-            }
-            return best;
-          },
-          null as { candidate: Candidate; score: number } | null,
-        );
-
-        if (bestCandidate) {
-          const target = bestCandidate.candidate.target;
-
-          // [NEW] Announce target so others know I'm coming
           this.memory.targetId = target.id;
-
           if (
             this.creep.transfer(target, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE
           ) {
-            this.move(target, {
-              visualizePathStyle: bestCandidate.candidate.visual,
-            });
+            this.move(target, { visualizePathStyle: { stroke: "#ffffff" } });
           }
           return;
-        }
-      }
-
-      // Fallback: Dump to Upgrader if no other target
-      if (candidates.length === 0) {
-        const upgrader = this.creep.room.find(FIND_MY_CREEPS, {
-          filter: (c) =>
-            c.memory.role === "upgrader" &&
-            c.store.getFreeCapacity(RESOURCE_ENERGY) > 0,
-        })[0];
-        if (upgrader) {
-          if (
-            this.creep.transfer(upgrader, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE
-          ) {
-            this.move(upgrader);
-          }
         }
       }
     } else {
@@ -323,7 +102,7 @@ export default class Hauler extends Role {
       }
 
       // 0.5 Tombstones & Ruins
-      const tombstone = this.creep.pos.findClosestByPath(FIND_TOMBSTONES, {
+      const tombstone = this.creep.pos.findClosestByRange(FIND_TOMBSTONES, {
         filter: (t) => t.store[RESOURCE_ENERGY] > 50,
       });
       if (tombstone) {
@@ -334,7 +113,7 @@ export default class Hauler extends Role {
         }
         return;
       }
-      const ruin = this.creep.pos.findClosestByPath(FIND_RUINS, {
+      const ruin = this.creep.pos.findClosestByRange(FIND_RUINS, {
         filter: (r) => r.store[RESOURCE_ENERGY] > 50,
       });
       if (ruin) {
@@ -345,7 +124,7 @@ export default class Hauler extends Role {
       }
 
       // 1. Dropped Resources
-      const dropped = this.creep.pos.findClosestByPath(FIND_DROPPED_RESOURCES, {
+      const dropped = this.creep.pos.findClosestByRange(FIND_DROPPED_RESOURCES, {
         filter: (r) => r.resourceType === RESOURCE_ENERGY && r.amount > 50,
       });
       if (dropped) {
@@ -366,7 +145,7 @@ export default class Hauler extends Role {
           sources.some((source) => s.pos.inRangeTo(source, 3)),
       });
 
-      const container = this.creep.pos.findClosestByPath(containers);
+      const container = this.creep.pos.findClosestByRange(containers);
 
       if (container) {
         if (

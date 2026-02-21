@@ -1,4 +1,5 @@
-import populationModule from "./populationManager";
+import populationModule from "../modules/lifecycle/populationManager"; // Fix import path
+import { EnergyManager, CrisisLevel } from "./EnergyManager";
 import StatsManager from "./statsManager";
 
 const monitorModule = {
@@ -46,7 +47,7 @@ const monitorModule = {
 
     // 能量趋势 & 等级
     const energyTrend = StatsManager.getTrend(room.name, "energy");
-    const energyLevel = populationModule.getEnergyLevel(room);
+    const energyLevel = EnergyManager.getLevel(room); // Use EnergyManager directly
 
     // CPU 趋势
     const cpuTrend = StatsManager.getTrend(room.name, "cpu");
@@ -63,9 +64,9 @@ const monitorModule = {
 
     // 能量详情
     const energyColor =
-      energyLevel === "CRITICAL"
+      energyLevel === CrisisLevel.CRITICAL
         ? "#ff0000"
-        : energyLevel === "LOW"
+        : energyLevel === CrisisLevel.LOW
           ? "#ffff00"
           : "#00ff00";
     visual.text(
@@ -188,19 +189,23 @@ const monitorModule = {
     row += 0.8;
 
     const sources = room.find(FIND_SOURCES);
-    const haulerNeeds = populationModule.getHaulerNeeds(room);
+    const haulerNeeds = populationModule.calculateHaulerNeeds(room, sources, energyLevel); // Return number, not map
     const haulers = room.find(FIND_MY_CREEPS, {
       filter: (c) => c.memory.role === "hauler",
     });
 
-    // 统计当前每个 Source 的 Hauler 数量
-    const currentCounts = {};
-    haulers.forEach((c) => {
-      if (c.memory.sourceId) {
-        currentCounts[c.memory.sourceId] =
-          (currentCounts[c.memory.sourceId] || 0) + 1;
-      }
+    // Total Comparison
+    const totalNeeded = haulerNeeds;
+    const totalCurrent = haulers.length;
+    let totalColor = "#00ff00";
+    if (totalCurrent < totalNeeded) totalColor = "#ff0000";
+
+    visual.text(`总搬运: ${totalCurrent}/${totalNeeded}`, x, row, {
+      align: "left",
+      font: 0.6,
+      color: totalColor,
     });
+    row += 0.8;
 
     sources.forEach((source) => {
       const container = source.pos.findInRange(FIND_STRUCTURES, 2, {
@@ -208,8 +213,6 @@ const monitorModule = {
       })[0];
       const energy = container ? container.store[RESOURCE_ENERGY] : 0;
       const capacity = container ? container.store.getCapacity() : 0;
-      const needed = haulerNeeds[source.id] || 0;
-      const current = currentCounts[source.id] || 0;
 
       // 颜色逻辑：积压红，正常绿，无容器灰
       let color = "#00ff00";
@@ -226,16 +229,6 @@ const monitorModule = {
         align: "left",
         font: 0.5,
         color: color,
-      });
-
-      // 搬运工状态：当前/目标
-      let haulerColor = "#ffffff";
-      if (current < needed) haulerColor = "#ff0000"; // 缺人
-      if (current > needed) haulerColor = "#00ffff"; // 富余
-      visual.text(`🚚 ${current}/${needed}`, x + 6, row, {
-        align: "left",
-        font: 0.5,
-        color: haulerColor,
       });
 
       row += 0.6;
@@ -352,11 +345,11 @@ const monitorModule = {
         
         // Count tasks
         let taskCount = 0;
-        for (const id in dispatch.tasks) { taskCount++; }
+        for (const _id in dispatch.tasks) { taskCount++; }
         
         // Count active assignments
         let assignCount = 0;
-        for (const id in dispatch.assignments) { assignCount++; }
+        for (const _id in dispatch.assignments) { assignCount++; }
         
         visual.text(`Tasks: ${taskCount} | Assigned: ${assignCount}`, x, row, {
             align: "left", font: 0.5, color: "#aaaaaa"

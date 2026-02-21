@@ -89,6 +89,27 @@ export interface DispatchMemory {
   spawnQueue: SpawnTask[]; // [NEW] Centralized Spawn Queue
 }
 
+// Lifecycle Memory Structure
+export interface LifecycleRequest {
+  role: string;
+  baseMemory: CreepMemory;
+  priority: number;
+  requestTime: number;
+}
+
+export interface LifecycleHistory {
+  time: number;
+  creep: string;
+  type: string;
+  message: string;
+}
+
+export interface LifecycleMemory {
+  requests: { [creepName: string]: LifecycleRequest };
+  history: LifecycleHistory[];
+  registry: { [creepName: string]: "NORMAL" | "PRE_SPAWNING" };
+}
+
 // Creep Extension
 declare global {
   interface CreepMemory {

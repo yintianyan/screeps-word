@@ -277,7 +277,7 @@ export class EnergyManager {
   }
 
   static getLevel(room: Room): CrisisLevel {
-    return room.memory.energyManager?.level || CrisisLevel.NONE;
+    return (room.memory.energyManager?.level as CrisisLevel) || CrisisLevel.NONE;
   }
 
   static getBudget(room: Room, type: "upgrader" | "builder"): number {

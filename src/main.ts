@@ -1,13 +1,13 @@
 import Kernel from "./ai/kernel";
-import populationModule from "./components/populationManager";
+import populationModule from "./modules/lifecycle/populationManager"; // [NEW] Use new path
 import structurePlanner from "./modules/builder/structurePlanner";
 import towerModule from "./modules/defender/tower";
 import linkManager from "./components/linkManager";
 import monitorModule from "./components/monitor";
-import spawnerModule from "./components/spawnManager";
+// import spawnerModule from "./components/spawnManager"; // [DEPRECATED]
 import creepsModule from "./components/creepManager";
 import trafficModule from "./components/trafficManager";
-import Lifecycle from "./components/roomManager";
+import Lifecycle from "./modules/lifecycle/index"; // [NEW] Use new path
 import brainModule from "./ai/brainModule";
 
 // [NEW] Dispatch System Modules
@@ -41,8 +41,8 @@ Kernel.register("datacenter", DataCenter, "global"); // [NEW] Data Center
 
 // 1. 核心逻辑 (人口 & 孵化) - 房间级别
 Kernel.register("population", populationModule); // 仅计算
-Kernel.register("lifecycle", Lifecycle); // 生命周期监控
-Kernel.register("spawner", spawnerModule); // 孵化执行
+Kernel.register("lifecycle", Lifecycle); // 生命周期监控 & 孵化执行
+// Kernel.register("spawner", spawnerModule); // [DEPRECATED] Integrated into Lifecycle
 
 // 2. 规划与建造 - 房间级别
 Kernel.register("planner", structurePlanner);

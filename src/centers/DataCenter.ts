@@ -1,4 +1,4 @@
-import { DataStore, RoomSnapshot } from "../types/stats";
+// import { DataStore, RoomSnapshot } from "../types/stats";
 import { AnomalyDetector } from "../modules/data/AnomalyDetector";
 
 export class DataCenter {
@@ -60,7 +60,7 @@ export class DataCenter {
     });
 
     // Example: Find rooms with surplus energy
-    const surplusRooms = Object.values(Memory.datastore.rooms).filter(
+    const _surplusRooms = Object.values(Memory.datastore.rooms).filter(
       (r) => r.energy.storage > 500000,
     );
   }

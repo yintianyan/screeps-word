@@ -1,6 +1,6 @@
 import { GlobalDispatch } from "../ai/GlobalDispatch";
-import { Task, TaskPriority, TaskType } from "../types/dispatch";
-import priorityModule from "../config/priority";
+import { TaskPriority, TaskType } from "../types/dispatch";
+// import priorityModule from "../config/priority";
 import Cache from "../components/memoryManager";
 import { EnergyManager, CrisisLevel } from "../components/EnergyManager";
 
@@ -444,7 +444,7 @@ export class EconomyCenter {
     // EnergyManager returns Budget in "Work Parts" or similar abstract unit?
     // Actually in config it's just a number. Let's interpret it as max creeps for simplicity in Task context.
     // Or we can say Budget = Max Creeps.
-    const budget = EnergyManager.getBudget(room, "upgrader");
+    const _budget = EnergyManager.getBudget(room, "upgrader");
     // If budget is in WORK parts (e.g. 50), and creep has 5 WORK, then count = 10.
     // But config says: 1-5 range mostly. So let's treat it as Max Creeps count for now or Work Parts limit?
     // Looking at config: RCL 8 Budget NONE = 15. A creep can have 15 WORK. So it's WORK parts?

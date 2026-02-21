@@ -31,14 +31,7 @@ const Kernel = {
     // 1. 系统维护
     Cache.clearTick(); // 重置 tick 缓存
 
-    // 清理失效内存
-    if (Game.time % 10 === 0) {
-      for (const name in Memory.creeps) {
-        if (!Game.creeps[name]) {
-          delete Memory.creeps[name];
-        }
-      }
-    }
+
 
     // 2. 逐房间运行模块
     // 优先遍历房间，再遍历模块，以共享房间级缓存

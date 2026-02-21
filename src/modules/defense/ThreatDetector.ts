@@ -1,4 +1,4 @@
-import { DataCenter } from "../../centers/DataCenter";
+import { DefenseCenter } from "../../centers/DefenseCenter";
 
 export class ThreatDetector {
   /**

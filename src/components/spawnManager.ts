@@ -1,11 +1,13 @@
 import { GlobalDispatch } from "../ai/GlobalDispatch";
-import Lifecycle from "./roomManager";
+import Lifecycle from "../modules/lifecycle/index";
 
 /**
  * 模块：孵化器 (Spawner)
  * 处理所有 Creep 的孵化逻辑
  * 现在的角色是：执行者 (Executor)
  * 它从 GlobalDispatch 获取孵化任务并执行，不再自己做决策
+ * 
+ * @deprecated Integrated into Lifecycle module. Kept for backward compatibility if needed.
  */
 const spawnerModule = {
   run: function (room: Room) {
@@ -51,17 +53,18 @@ const spawnerModule = {
       );
 
       if (result === OK) {
-        console.log(
-          `[Spawner] ✅ 执行孵化任务: ${task.role} (Priority: ${task.priority})`,
-        );
+        // Reduced log level to save CPU/Console space
+        // console.log(
+        //   `[Spawner] ✅ 执行孵化任务: ${task.role} (Priority: ${task.priority})`,
+        // );
 
         // 如果是 Lifecycle 替换，通知 Lifecycle 清理
         // 通过 memory.predecessorId 判断
         if (task.memory.predecessorId) {
-          Lifecycle.notifySpawn(
-            task.memory.predecessorId,
-            task.id.replace("SPAWN_", ""),
-          );
+            // Deprecated: notifySpawn was part of old Lifecycle
+            // New Lifecycle handles cleanup via processSpawnQueue or memory cleanup
+            // Just log for now
+            // console.log("Spawned replacement for " + task.memory.predecessorId);
         }
       } else {
         // 失败处理？
@@ -70,12 +73,15 @@ const spawnerModule = {
         // 如果失败了，我们需要重新注册回去。
         if (result === ERR_NOT_ENOUGH_ENERGY) {
           // [Visualization] Show waiting status
-          spawn.room.visual.text(
-            "⏳ Waiting for energy",
-            spawn.pos.x + 1,
-            spawn.pos.y,
-            { align: "left", opacity: 0.8, color: "#ffff00" },
-          );
+          // Throttle visual
+          if (Game.time % 5 === 0) {
+              spawn.room.visual.text(
+                "⏳ Energy",
+                spawn.pos.x + 1,
+                spawn.pos.y,
+                { align: "left", opacity: 0.8, color: "#ffff00" },
+              );
+          }
 
           // 放回队列头部?
           // 暂时简单重新注册
@@ -98,24 +104,6 @@ const spawnerModule = {
         });
         if (harvesters.length > 0) {
           return ERR_INVALID_ARGS; // Reject weakling if not emergency
-        }
-      }
-
-      // 2. Check for Duplicates (Double safety net)
-      // If room already has enough harvesters, reject.
-      // Note: This might conflict with replacement logic if not careful.
-      // Replacement task usually has 'predecessorId'.
-      if (!task.memory.predecessorId) {
-        const harvesters = spawn.room.find(FIND_MY_CREEPS, {
-          filter: (c) => c.memory.role === "harvester",
-        });
-        const sources = spawn.room.find(FIND_SOURCES).length;
-        if (harvesters.length >= sources * 2) {
-          // Hard cap 2 per source
-          // Allow if total work is low?
-          // Rely on PopulationManager's logic, but this is a final sanity check.
-          // Let's just log it but allow for now, unless extreme.
-          if (harvesters.length >= 6) return ERR_INVALID_ARGS;
         }
       }
     }
