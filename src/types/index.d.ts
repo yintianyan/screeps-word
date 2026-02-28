@@ -89,12 +89,44 @@ declare global {
       layout: "stamp" | "bunker";
       anchor?: { x: number; y: number };
     };
+    buildFocus?: {
+      siteId: string;
+      lastProgress: number;
+      lastTick: number;
+    };
+    defenseLastHostile?: number;
+    defense?: {
+      hostiles: number;
+      lastSeen: number;
+      canFight: boolean;
+    };
+    links?: {
+      source?: string[];
+      hub?: string;
+      controller?: string;
+      lastScan?: number;
+      lastPlan?: number;
+    };
     scout?: {
       lastScan: number;
       status: "pending" | "active" | "completed";
+      targetRoom?: string;
     };
     remote?: {
       [roomName: string]: {
+        stats?: {
+          lastCalc: number;
+          distance: number;
+          neededCarryParts: number;
+          sourceCount: number;
+        };
+        sources?: {
+          [sourceId: string]: {
+            containerPos?: { x: number; y: number };
+            containerId?: string;
+            lastPlan?: number;
+          };
+        };
         reserver?: {
           targetRoom: string;
           ticksToEnd: number;
@@ -104,6 +136,7 @@ declare global {
           level: number;
           lastSeen: number;
           hostiles: number;
+          hasKeeper?: boolean;
         };
       };
     };

@@ -1,0 +1,7 @@
+- [x] 主干代码不包含 `src/legacy` 的 import 引用
+- [x] 删除 `src/legacy/**` 后 `npm run build` 通过
+- [x] 删除 `src/legacy/**` 后 `npm run lint` 通过
+- [x] main loop 对单点异常具备隔离，tick 可继续推进
+- [x] smartMove 的 costCallback 类型正确且运行无异常
+- [x] 远矿发现/威胁/孵化写入点集中且 `RoomMemory` 类型稳定
+- [x] Memory.stats 按固定结构持续写入 cpu 与房间指标

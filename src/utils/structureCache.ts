@@ -1,101 +1,41 @@
-// Heap Cache for Room Structures
-// Reset every tick
-const cache: {
-  [roomName: string]: {
-    tick: number;
-    structures: {
-      [type: string]: Structure[];
-    };
-    myStructures: {
-      [type: string]: Structure[];
-    };
-    creeps: {
-      [role: string]: Creep[];
-    };
-    constructionSites: ConstructionSite[];
-    sources: Source[];
-  };
-} = {};
+import { Cache } from "../core/Cache";
 
 export default class StructureCache {
   static getStructures(
     room: Room,
     type: StructureConstant,
   ): Structure[] {
-    this.ensureCache(room);
-    if (!cache[room.name].structures[type]) {
-      // Lazy load specific type?
-      // Or just filter from all structures?
-      // Finding ALL structures is expensive if we only need one type.
-      // But finding specific type is fast.
-      // Let's use room.find with filter, and cache it.
-      cache[room.name].structures[type] = room.find(FIND_STRUCTURES, {
-        filter: { structureType: type },
-      });
-    }
-    return cache[room.name].structures[type];
+    return Cache.getTick(`sc:structures:${room.name}:${type}`, () =>
+      room.find(FIND_STRUCTURES, { filter: { structureType: type } }),
+    );
   }
 
   static getMyStructures(
     room: Room,
     type: StructureConstant,
   ): Structure[] {
-    this.ensureCache(room);
-    if (!cache[room.name].myStructures[type]) {
-      cache[room.name].myStructures[type] = room.find(FIND_MY_STRUCTURES, {
-        filter: { structureType: type },
-      });
-    }
-    return cache[room.name].myStructures[type];
+    return Cache.getTick(`sc:myStructures:${room.name}:${type}`, () =>
+      room.find(FIND_MY_STRUCTURES, { filter: { structureType: type } }),
+    );
   }
   
   static getCreeps(room: Room, role?: string): Creep[] {
-    this.ensureCache(room);
-    
-    // Always cache 'all' first if not present
-    if (!cache[room.name].creeps['all']) {
-        cache[room.name].creeps['all'] = room.find(FIND_MY_CREEPS);
-    }
-
-    if (role) {
-        if (!cache[room.name].creeps[role]) {
-            // Filter from cached 'all' list instead of running room.find again
-            cache[room.name].creeps[role] = cache[room.name].creeps['all'].filter(
-                (c) => c.memory.role === role
-            );
-        }
-        return cache[room.name].creeps[role];
-    }
-    
-    return cache[room.name].creeps['all'];
+    const all = Cache.getTick(`sc:creeps:${room.name}:all`, () =>
+      room.find(FIND_MY_CREEPS),
+    );
+    if (!role) return all;
+    return Cache.getTick(`sc:creeps:${room.name}:role:${role}`, () =>
+      all.filter((c) => c.memory.role === role),
+    );
   }
 
   static getConstructionSites(room: Room): ConstructionSite[] {
-    this.ensureCache(room);
-    if (!cache[room.name].constructionSites) {
-      cache[room.name].constructionSites = room.find(FIND_CONSTRUCTION_SITES);
-    }
-    return cache[room.name].constructionSites;
+    return Cache.getTick(`sc:sites:${room.name}`, () =>
+      room.find(FIND_CONSTRUCTION_SITES),
+    );
   }
 
   static getSources(room: Room): Source[] {
-    this.ensureCache(room);
-    if (!cache[room.name].sources) {
-      cache[room.name].sources = room.find(FIND_SOURCES);
-    }
-    return cache[room.name].sources;
-  }
-
-  private static ensureCache(room: Room) {
-    if (!cache[room.name] || cache[room.name].tick !== Game.time) {
-      cache[room.name] = {
-        tick: Game.time,
-        structures: {},
-        myStructures: {},
-        creeps: {},
-        constructionSites: null as any,
-        sources: null as any,
-      };
-    }
+    return Cache.getTick(`sc:sources:${room.name}`, () => room.find(FIND_SOURCES));
   }
 }

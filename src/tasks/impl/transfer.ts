@@ -1,10 +1,26 @@
 import { TaskRunResult } from "../types";
+import { smartMove } from "../move/smartMove";
 
-function pickEnergyTarget(creep: Creep): StructureSpawn | StructureExtension | null {
+type TransferTarget =
+  | StructureSpawn
+  | StructureExtension
+  | StructureTower
+  | StructureStorage
+  | StructureContainer
+  | StructureLink;
+
+function pickEnergyTarget(creep: Creep): TransferTarget | null {
   const spawn = creep.room.find(FIND_MY_SPAWNS, {
     filter: (s) => s.store.getFreeCapacity(RESOURCE_ENERGY) > 0,
   })[0];
   if (spawn) return spawn;
+
+  const tower = creep.pos.findClosestByRange(FIND_MY_STRUCTURES, {
+    filter: (s) =>
+      s.structureType === STRUCTURE_TOWER &&
+      (s as StructureTower).store.getFreeCapacity(RESOURCE_ENERGY) > 0,
+  }) as StructureTower | null;
+  if (tower) return tower;
 
   const extension = creep.pos.findClosestByRange(FIND_MY_STRUCTURES, {
     filter: (s) =>
@@ -12,21 +28,30 @@ function pickEnergyTarget(creep: Creep): StructureSpawn | StructureExtension | n
       (s as StructureExtension).store.getFreeCapacity(RESOURCE_ENERGY) > 0,
   }) as StructureExtension | null;
 
-  return extension ?? null;
+  if (extension) return extension;
+
+  const storage = creep.room.storage;
+  if (storage) return storage;
+
+  return null;
 }
 
 export function runTransfer(
   creep: Creep,
   targetId?: string,
 ): TaskRunResult {
-  const target = targetId
-    ? (Game.getObjectById(targetId as Id<Structure>) as
-        | StructureSpawn
-        | StructureExtension
-        | null)
-    : null;
+  const target = targetId ? (Game.getObjectById(targetId as Id<Structure>) as unknown) : null;
+  const typedTarget =
+    target instanceof StructureSpawn ||
+    target instanceof StructureExtension ||
+    target instanceof StructureTower ||
+    target instanceof StructureStorage ||
+    target instanceof StructureContainer ||
+    target instanceof StructureLink
+      ? target
+      : null;
 
-  const actualTarget = target ?? pickEnergyTarget(creep);
+  const actualTarget = typedTarget ?? pickEnergyTarget(creep);
   if (!actualTarget) return { status: "failed", reason: "targetInvalid" };
 
   const result = creep.transfer(actualTarget, RESOURCE_ENERGY);
@@ -36,7 +61,7 @@ export function runTransfer(
   }
 
   if (result === ERR_NOT_IN_RANGE) {
-    const moveResult = creep.moveTo(actualTarget, { reusePath: 10 });
+    const moveResult = smartMove(creep, actualTarget, { reusePath: 10, range: 1 });
     if (moveResult === ERR_NO_PATH) return { status: "failed", reason: "pathBlocked" };
     return { status: "running" };
   }

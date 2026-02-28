@@ -1,4 +1,5 @@
 import { TaskRunResult } from "../types";
+import { smartMove } from "../move/smartMove";
 
 export function runUpgrade(creep: Creep): TaskRunResult {
   const controller = creep.room.controller;
@@ -10,7 +11,7 @@ export function runUpgrade(creep: Creep): TaskRunResult {
   const result = creep.upgradeController(controller);
   if (result === OK) return { status: "running" };
   if (result === ERR_NOT_IN_RANGE) {
-    const moveResult = creep.moveTo(controller, { reusePath: 10, range: 3 });
+    const moveResult = smartMove(creep, controller, { reusePath: 10, range: 3 });
     if (moveResult === ERR_NO_PATH)
       return { status: "failed", reason: "pathBlocked" };
     return { status: "running" };
