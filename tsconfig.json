@@ -18,5 +18,5 @@
     "types": ["screeps", "lodash", "node", "jest"]
   },
   "include": ["src/**/*", "tests/**/*"],
-  "exclude": ["node_modules", "test"]
+  "exclude": ["node_modules", "test", "src/legacy"]
 }

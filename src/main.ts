@@ -1,83 +1,56 @@
-import Kernel from "./ai/kernel";
-import populationModule from "./modules/lifecycle/populationManager"; // [NEW] Use new path
-import structurePlanner from "./modules/builder/structurePlanner";
-import towerModule from "./modules/defender/tower";
-import linkManager from "./components/linkManager";
-import monitorModule from "./components/monitor";
-// import spawnerModule from "./components/spawnManager"; // [DEPRECATED]
-import creepsModule from "./components/creepManager";
-import trafficModule from "./components/trafficManager";
-import Lifecycle from "./modules/lifecycle/index"; // [NEW] Use new path
-import brainModule from "./ai/brainModule";
+import { Kernel } from "./core/Kernel";
+import { InitProcess } from "./modules/InitProcess";
+import { RoomLogisticsProcess } from "./modules/RoomLogisticsProcess";
+import { RoomPlannerProcess } from "./modules/RoomPlannerProcess";
+import { SpawnerProcess } from "./modules/SpawnerProcess";
+import { ErrorMapper } from "./core/ErrorMapper";
+import { recordCpuStats, recordRoomStats } from "./core/Stats";
+import { gcCreepMemory, gcRoomStats } from "./core/MemoryGC";
 
-// [NEW] Dispatch System Modules
-import { SupremeCommand } from "./ai/SupremeCommand";
-import { EconomyCenter } from "./centers/EconomyCenter";
-import { DefenseCenter } from "./centers/DefenseCenter";
-import { SpawnCenter } from "./centers/SpawnCenter"; // [NEW]
-import { GlobalDispatch } from "./ai/GlobalDispatch";
-import { DataCenter } from "./centers/DataCenter";
-import { RoomCollector } from "./modules/data/RoomCollector";
-import { Dashboard } from "./visuals/Dashboard";
-import { RemoteManager } from "./modules/remote/RemoteManager";
-import scout from "./roles/scout";
-import remoteHarvester from "./roles/remoteHarvester";
-import remoteHauler from "./roles/remoteHauler";
-import remoteReserver from "./roles/remoteReserver";
-import remoteDefender from "./roles/remoteDefender";
+let kernel: Kernel | null = null;
 
-// === 注册模块 ===
+export const loop = ErrorMapper.wrapLoop(() => {
+  if (!Memory.kernel) kernel = null;
+  if (!kernel) kernel = new Kernel();
 
-// 0. 大脑决策 - 房间级别 (最优先)
-Kernel.register("brain", brainModule);
-Kernel.register("supreme", SupremeCommand); // [NEW] Strategic AI
-
-// 0.5 调度中心 (任务生成)
-Kernel.register("economy", EconomyCenter); // [NEW]
-Kernel.register("defense", DefenseCenter); // [NEW]
-Kernel.register("spawn_center", SpawnCenter); // [NEW] Spawn Planning
-Kernel.register("dispatch", GlobalDispatch); // [NEW] Task Assignment (Room Level)
-Kernel.register("datacenter", DataCenter, "global"); // [NEW] Data Center
-
-// 1. 核心逻辑 (人口 & 孵化) - 房间级别
-Kernel.register("population", populationModule); // 仅计算
-Kernel.register("lifecycle", Lifecycle); // 生命周期监控 & 孵化执行
-// Kernel.register("spawner", spawnerModule); // [DEPRECATED] Integrated into Lifecycle
-
-// 2. 规划与建造 - 房间级别
-Kernel.register("planner", structurePlanner);
-Kernel.register("collector", RoomCollector); // [NEW] Data Collector
-Kernel.register("dashboard", Dashboard); // [NEW] Visualization
-Kernel.register("remote", RemoteManager); // [NEW] Remote Mining
-
-// 3. 防御与监控 - 房间级别
-Kernel.register("tower", towerModule);
-Kernel.register("link", linkManager); // [NEW] Link Management
-Kernel.register("monitor", monitorModule);
-Kernel.register("traffic", trafficModule);
-
-// 4. 全局逻辑 - 全局级别
-// 注册新角色到 creepsModule
-creepsModule.register("scout", scout);
-creepsModule.register("remote_harvester", remoteHarvester);
-creepsModule.register("remote_hauler", remoteHauler);
-creepsModule.register("remote_reserver", remoteReserver);
-creepsModule.register("remote_defender", remoteDefender);
-Kernel.register("creeps", creepsModule, "global");
-
-import taskCleanup from "./utils/taskCleanup";
-
-// 主循环
-export const loop = () => {
-  // [One-off] Cleanup Tasks if requested
-  if (Game.flags['cleanup']) {
-      taskCleanup.run();
-      Game.flags['cleanup'].remove();
+  if (Game.time % 50 === 0) {
+    gcCreepMemory();
+    gcRoomStats(100);
   }
 
-  // 1. 内存清理与初始化
-  // ...
+  if (!Memory.kernel.processTable["init"]) {
+    console.log("[Main] Initializing Kernel...");
+    const initProc = new InitProcess("init", "root", 100);
+    kernel.addProcess(initProc);
+  }
 
-  // 2. 运行内核
-  Kernel.run();
-};
+  if (!Memory.kernel.processTable["logistics"]) {
+    kernel.addProcess(new RoomLogisticsProcess("logistics", "init", 80));
+  }
+
+  if (!Memory.kernel.processTable["spawner"]) {
+    kernel.addProcess(new SpawnerProcess("spawner", "init", 90));
+  }
+
+  if (!Memory.kernel.processTable["planner"]) {
+    kernel.addProcess(new RoomPlannerProcess("planner", "init", 10));
+  }
+
+  const start = Game.cpu.getUsed();
+  kernel.run();
+  const end = Game.cpu.getUsed();
+
+  recordCpuStats({
+    bucket: Game.cpu.bucket,
+    used: end,
+    limit: Game.cpu.limit,
+    scheduler: end - start,
+  });
+
+  if (Game.time % 5 === 0) {
+    for (const roomName in Game.rooms) {
+      const room = Game.rooms[roomName];
+      if (room.controller?.my) recordRoomStats(room, 100);
+    }
+  }
+});

@@ -10,6 +10,9 @@ export enum TaskType {
   REMOTE_RESERVE = "remote_reserve", // [NEW]
   REMOTE_DEFEND = "remote_defend", // [NEW]
   SCOUT = "scout", // [NEW]
+  SK_GUARD = "sk_guard", // [NEW] Source Keeper Guard
+  SK_MINE = "sk_mine", // [NEW] Source Keeper Miner
+  SK_HAUL = "sk_haul", // [NEW] Source Keeper Hauler
   ATTACK = "attack",
   TRANSFER = "transfer", // [FIX] Added missing types
   DELIVER = "deliver", // [NEW] Added DELIVER

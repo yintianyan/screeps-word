@@ -50,20 +50,24 @@ export default class StructureCache {
   }
   
   static getCreeps(room: Room, role?: string): Creep[] {
-      this.ensureCache(room);
-      if (role) {
-          if (!cache[room.name].creeps[role]) {
-              cache[room.name].creeps[role] = room.find(FIND_MY_CREEPS, {
-                  filter: (c) => c.memory.role === role
-              });
-          }
-          return cache[room.name].creeps[role];
-      }
-      // All creeps (cached under 'all')
-      if (!cache[room.name].creeps['all']) {
-          cache[room.name].creeps['all'] = room.find(FIND_MY_CREEPS);
-      }
-      return cache[room.name].creeps['all'];
+    this.ensureCache(room);
+    
+    // Always cache 'all' first if not present
+    if (!cache[room.name].creeps['all']) {
+        cache[room.name].creeps['all'] = room.find(FIND_MY_CREEPS);
+    }
+
+    if (role) {
+        if (!cache[room.name].creeps[role]) {
+            // Filter from cached 'all' list instead of running room.find again
+            cache[room.name].creeps[role] = cache[room.name].creeps['all'].filter(
+                (c) => c.memory.role === role
+            );
+        }
+        return cache[room.name].creeps[role];
+    }
+    
+    return cache[room.name].creeps['all'];
   }
 
   static getConstructionSites(room: Room): ConstructionSite[] {

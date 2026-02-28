@@ -1,14 +1,18 @@
 import { DispatchMemory, LifecycleMemory } from "./dispatch";
+import { KernelMemory } from "../core/types";
 
 declare global {
-  // Memory extension samples
   interface CreepMemory {
     role: string;
-    room?: string;
-    working?: boolean;
-    sourceId?: string; // For Harvester
-    targetId?: string; // For Hauler
-    hauling?: boolean; // For Hauler
+    room: string;
+    working: boolean;
+    taskId?: string;
+    targetId?: string;
+    taskStart?: number;
+    _move?: unknown;
+
+    sourceId?: string;
+    hauling?: boolean;
     idleTicks?: number;
     requestingEnergy?: boolean;
     waitingTicks?: number;
@@ -17,12 +21,9 @@ declare global {
       idleTicks: number;
       totalTicks: number;
     };
-    // Remote Specific
     targetRoom?: string;
     homeRoom?: string;
-    _move?: any;
-    _moveRequest?: any;
-    [key: string]: any;
+    _moveRequest?: unknown;
   }
 
   interface RoomStats {
@@ -47,37 +48,47 @@ declare global {
         history: RoomStatsEntry[];
       }
     >;
+    cpu: {
+      bucket: number;
+      used: number;
+      limit: number;
+      scheduler: number;
+    };
+    time: number;
   }
 
   interface Memory {
     uuid: number;
-    log: any;
-    watch: any;
-    profiler: any;
+    log: unknown;
+    watch: unknown;
     config: {
-        taskManager?: {
-            maxQueueLength: number;
-            maxRetry: number;
-            ttl: {
-                completed: number;
-                failed: number;
-                pending: number;
-            };
-            cleanupInterval: number;
+      taskManager?: {
+        maxQueueLength: number;
+        maxRetry: number;
+        ttl: {
+          completed: number;
+          failed: number;
+          pending: number;
         };
-        [key: string]: any;
+        cleanupInterval: number;
+      };
     };
-    stats: StatsMemory;
-    lifecycle: LifecycleMemory; // [FIX] Strict type
-    dispatch: DispatchMemory; // [NEW] Global Dispatch Memory
-    datastore: import("./stats").DataStore; // [NEW] Data Center
-    _logFlood: any;
+    stats?: StatsMemory;
+    lifecycle: LifecycleMemory;
+    dispatch: DispatchMemory;
+    datastore: import("./stats").DataStore;
+    kernel: KernelMemory;
+    _logFlood: unknown;
   }
 
   interface RoomMemory {
-    avoid?: any;
+    avoid?: unknown;
     energyLevel?: "CRITICAL" | "LOW" | "MEDIUM" | "HIGH";
-    remotes?: string[]; // List of remote rooms to mine
+    remotes?: string[];
+    planner?: {
+      layout: "stamp" | "bunker";
+      anchor?: { x: number; y: number };
+    };
     scout?: {
       lastScan: number;
       status: "pending" | "active" | "completed";
@@ -86,29 +97,27 @@ declare global {
       [roomName: string]: {
         reserver?: {
           targetRoom: string;
-          ticksToEnd: number; // Ticks until reservation ends
-          assigned: boolean; // Is a reserver assigned?
+          ticksToEnd: number;
+          assigned: boolean;
         };
         threat?: {
-          level: number; // 0-5
+          level: number;
           lastSeen: number;
           hostiles: number;
         };
       };
     };
-    [key: string]: any;
   }
 
   interface Room {
-    _laneMatrices?: any;
+    _laneMatrices?: unknown;
     _populationTargets?: Record<string, number>;
     _populationTargetsTick?: number;
   }
 
   namespace NodeJS {
     interface Global {
-      log: any;
-      [key: string]: any;
+      log: unknown;
     }
   }
 }
