@@ -20,4 +20,4 @@
 - Memory.stats 必须稳定写入：cpu.bucket、cpu.usage、cpu.scheduler
 - 房间指标：room.energyAvailable、room.rcl_progress（或等价拆分）
 - 禁止输出/记录敏感信息；禁止引入新第三方库（除非说明收益与替代）
-- 禁止加注释（除非用户明确要求）
+

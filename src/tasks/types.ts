@@ -6,8 +6,11 @@ export type TaskType =
   | "repair"
   | "attack"
   | "heal"
+  | "rangedAttack"
+  | "claim"
   | "pickup"
-  | "withdraw";
+  | "withdraw"
+  | "recycle";
 
 export interface ITask {
   id: string;

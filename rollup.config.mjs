@@ -12,7 +12,7 @@ export default {
   plugins: [
     resolve({ rootDir: "src" }),
     commonjs(),
-    typescript({ tsconfig: "./tsconfig.json" }),
+    typescript({ tsconfig: "./tsconfig.build.json" }),
   ],
   external: ["lodash"], // lodash usually exists in global, but sometimes we bundle it. Screeps has global _.
 };

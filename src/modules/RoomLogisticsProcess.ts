@@ -1,17 +1,22 @@
 import { Process } from "../core/Process";
 import { processRegistry } from "../core/ProcessRegistry";
 import { TaskType } from "../tasks/types";
-import { runHarvest } from "../tasks/impl/harvest";
-import { runTransfer } from "../tasks/impl/transfer";
-import { runUpgrade } from "../tasks/impl/upgrade";
-import { runBuild } from "../tasks/impl/build";
 import { config } from "../config";
+import { tryReserve } from "../core/Reservation";
+import { Cache } from "../core/Cache";
+import StructureCache from "../utils/structureCache";
+import { HarvestTask } from "../tasks/HarvestTask";
+import { TransferTask } from "../tasks/TransferTask";
+import { UpgradeTask } from "../tasks/UpgradeTask";
+import { BuildTask } from "../tasks/BuildTask";
+import { WithdrawTask } from "../tasks/WithdrawTask";
+import { PickupTask } from "../tasks/PickupTask";
 
 type SupportedTask = Extract<
   TaskType,
-  "harvest" | "transfer" | "upgrade" | "build"
+  "pickup" | "harvest" | "withdraw" | "transfer" | "upgrade" | "build"
 >;
-type AssignedTask = { type: SupportedTask; targetId?: string; start: number };
+type AssignedTask = { type: SupportedTask; targetId?: string };
 
 const sourceSlotsCache: Record<string, number> = {};
 
@@ -33,65 +38,6 @@ function hashString(value: string): number {
   return h;
 }
 
-function getTask(creep: Creep): AssignedTask | null {
-  const taskId = creep.memory.taskId;
-  const start = creep.memory.taskStart;
-  if (!taskId || start == null) return null;
-  if (
-    taskId !== "harvest" &&
-    taskId !== "transfer" &&
-    taskId !== "upgrade" &&
-    taskId !== "build"
-  )
-    return null;
-  return { type: taskId, targetId: creep.memory.targetId, start };
-}
-
-function clearTask(creep: Creep): void {
-  delete creep.memory.taskId;
-  delete creep.memory.targetId;
-  delete creep.memory.taskStart;
-}
-
-function setTask(creep: Creep, task: Omit<AssignedTask, "start">): void {
-  creep.memory.taskId = task.type;
-  creep.memory.targetId = task.targetId;
-  creep.memory.taskStart = Game.time;
-}
-
-function runAssignedTask(creep: Creep, task: AssignedTask): void {
-  if (Game.time - task.start > 50) {
-    clearTask(creep);
-    return;
-  }
-
-  if (task.type === "harvest") {
-    const r = runHarvest(creep, task.targetId);
-    if (r.status !== "running") clearTask(creep);
-    return;
-  }
-
-  if (task.type === "transfer") {
-    const r = runTransfer(creep, task.targetId);
-    if (r.status !== "running") clearTask(creep);
-    return;
-  }
-
-  if (task.type === "upgrade") {
-    const r = runUpgrade(creep);
-    if (r.status !== "running") clearTask(creep);
-    return;
-  }
-
-  if (task.type === "build") {
-    const r = runBuild(creep, task.targetId);
-    if (r.status !== "running") clearTask(creep);
-    return;
-  }
-
-  clearTask(creep);
-}
-
 function countSourceSlots(source: Source): number {
   const cached = sourceSlotsCache[source.id];
   if (cached != null) return cached;
@@ -111,32 +57,181 @@ function countSourceSlots(source: Source): number {
   return value;
 }
 
-function pickEnergyTargetId(creep: Creep): string | null {
-  const spawn = creep.pos.findClosestByRange(FIND_MY_SPAWNS, {
-    filter: (s) => s.store.getFreeCapacity(RESOURCE_ENERGY) > 0,
+function getDroppedEnergy(room: Room): Resource<RESOURCE_ENERGY>[] {
+  return Cache.getTick(`rl:dropped:${room.name}`, () => {
+    const drops = room.find(FIND_DROPPED_RESOURCES, {
+      filter: (r) => r.resourceType === RESOURCE_ENERGY && r.amount >= 50,
+    }) as Resource<RESOURCE_ENERGY>[];
+    return drops;
   });
-  if (spawn) return spawn.id;
+}
 
-  const extension = creep.pos.findClosestByRange(FIND_MY_STRUCTURES, {
-    filter: (s) =>
-      s.structureType === STRUCTURE_EXTENSION &&
-      (s as StructureExtension).store.getFreeCapacity(RESOURCE_ENERGY) > 0,
-  }) as StructureExtension | null;
+function getTombstonesWithEnergy(room: Room): Tombstone[] {
+  return Cache.getTick(`rl:tombstones:${room.name}`, () => {
+    return room.find(FIND_TOMBSTONES, {
+      filter: (t) => t.store.getUsedCapacity(RESOURCE_ENERGY) > 0,
+    });
+  });
+}
 
-  return extension ? extension.id : null;
+function getRuinsWithEnergy(room: Room): Ruin[] {
+  return Cache.getTick(`rl:ruins:${room.name}`, () => {
+    return room.find(FIND_RUINS, {
+      filter: (r) => r.store.getUsedCapacity(RESOURCE_ENERGY) > 0,
+    });
+  });
+}
+
+function getMyStructures(room: Room): Structure[] {
+  return Cache.getTick(`rl:myStructures:${room.name}`, () =>
+    room.find(FIND_MY_STRUCTURES),
+  );
+}
+
+function roomNeedsRefill(room: Room): boolean {
+  return Cache.getTick(`rl:needsRefill:${room.name}`, () => {
+    const spawns = StructureCache.getMyStructures(
+      room,
+      STRUCTURE_SPAWN,
+    ) as StructureSpawn[];
+    for (const s of spawns) {
+      if (s.store.getFreeCapacity(RESOURCE_ENERGY) > 0) return true;
+    }
+
+    const extensions = StructureCache.getMyStructures(
+      room,
+      STRUCTURE_EXTENSION,
+    ) as StructureExtension[];
+    for (const e of extensions) {
+      if (e.store.getFreeCapacity(RESOURCE_ENERGY) > 0) return true;
+    }
+
+    const towers = StructureCache.getMyStructures(
+      room,
+      STRUCTURE_TOWER,
+    ) as StructureTower[];
+    for (const t of towers) {
+      if (t.store.getFreeCapacity(RESOURCE_ENERGY) > 0) return true;
+    }
+
+    return false;
+  });
+}
+
+function pickClosestReservableId<T extends { id: string; pos: RoomPosition }>(
+  creep: Creep,
+  targets: T[],
+  getAmount: (t: T) => number,
+): string | null {
+  if (targets.length === 0) return null;
+  const capacity = creep.store.getCapacity(RESOURCE_ENERGY) || 50;
+
+  const rejected = new Set<string>();
+  for (let attempt = 0; attempt < 5; attempt++) {
+    let best: T | null = null;
+    let bestRange = 999;
+    for (const t of targets) {
+      if (rejected.has(t.id)) continue;
+      const range = creep.pos.getRangeTo(t.pos);
+      if (range < bestRange) {
+        bestRange = range;
+        best = t;
+      }
+    }
+    if (!best) return null;
+
+    const amount = getAmount(best);
+    const slots = Math.min(5, Math.ceil(amount / (capacity * 0.5)));
+    if (tryReserve(best.id, creep.name, slots)) return best.id;
+    rejected.add(best.id);
+  }
+  return null;
+}
+
+function pickDroppedEnergyId(creep: Creep): string | null {
+  if (creep.store.getFreeCapacity(RESOURCE_ENERGY) <= 0) return null;
+  const drops = getDroppedEnergy(creep.room);
+  if (drops.length === 0) return null;
+  return pickClosestReservableId(creep, drops, (d) => d.amount);
+}
+
+function pickTombstoneEnergyId(creep: Creep): string | null {
+  if (creep.store.getFreeCapacity(RESOURCE_ENERGY) <= 0) return null;
+  const tombstones = getTombstonesWithEnergy(creep.room);
+  if (tombstones.length === 0) return null;
+  return pickClosestReservableId(creep, tombstones, (t) =>
+    t.store.getUsedCapacity(RESOURCE_ENERGY),
+  );
+}
+
+function pickRuinEnergyId(creep: Creep): string | null {
+  if (creep.store.getFreeCapacity(RESOURCE_ENERGY) <= 0) return null;
+  const ruins = getRuinsWithEnergy(creep.room);
+  if (ruins.length === 0) return null;
+  return pickClosestReservableId(creep, ruins, (r) =>
+    r.store.getUsedCapacity(RESOURCE_ENERGY),
+  );
+}
+
+function pickEnergyTargetId(creep: Creep): string | null {
+  const spawns = StructureCache.getMyStructures(
+    creep.room,
+    STRUCTURE_SPAWN,
+  ) as StructureSpawn[];
+  for (const s of spawns) {
+    if (s.store.getFreeCapacity(RESOURCE_ENERGY) <= 0) continue;
+    if (tryReserve(s.id, creep.name, 1)) return s.id;
+  }
+
+  const extensions = StructureCache.getMyStructures(
+    creep.room,
+    STRUCTURE_EXTENSION,
+  ) as StructureExtension[];
+  let bestExtension: StructureExtension | null = null;
+  let bestExtensionRange = 999;
+  for (const e of extensions) {
+    if (e.store.getFreeCapacity(RESOURCE_ENERGY) <= 0) continue;
+    const range = creep.pos.getRangeTo(e);
+    if (range < bestExtensionRange) {
+      bestExtensionRange = range;
+      bestExtension = e;
+    }
+  }
+  if (bestExtension && tryReserve(bestExtension.id, creep.name, 1))
+    return bestExtension.id;
+
+  const towers = StructureCache.getMyStructures(
+    creep.room,
+    STRUCTURE_TOWER,
+  ) as StructureTower[];
+  let bestTower: StructureTower | null = null;
+  let bestTowerRange = 999;
+  for (const t of towers) {
+    if (t.store.getFreeCapacity(RESOURCE_ENERGY) <= 0) continue;
+    const range = creep.pos.getRangeTo(t);
+    if (range < bestTowerRange) {
+      bestTowerRange = range;
+      bestTower = t;
+    }
+  }
+  if (bestTower && tryReserve(bestTower.id, creep.name, 1)) return bestTower.id;
+
+  return null;
 }
 
 function pickConstructionSiteId(
   creep: Creep,
   assigned: Record<string, number>,
 ): string | null {
-  const sites = creep.room.find(FIND_MY_CONSTRUCTION_SITES);
+  const sites = StructureCache.getConstructionSites(creep.room).filter(
+    (s) => s.my,
+  );
   if (sites.length === 0) return null;
 
   const rcl = creep.room.controller?.level ?? 0;
   const existingByType: Partial<Record<BuildableStructureConstant, number>> =
     {};
-  for (const s of creep.room.find(FIND_MY_STRUCTURES)) {
+  for (const s of getMyStructures(creep.room)) {
     const t = s.structureType as BuildableStructureConstant;
     existingByType[t] = (existingByType[t] ?? 0) + 1;
   }
@@ -236,7 +331,7 @@ function pickSourceId(
   creep: Creep,
   assigned: Record<string, number>,
 ): string | null {
-  const sources = creep.room.find(FIND_SOURCES);
+  const sources = StructureCache.getSources(creep.room);
   if (sources.length === 0) return null;
 
   const startIndex = Math.abs(hashString(creep.name)) % sources.length;
@@ -250,6 +345,125 @@ function pickSourceId(
   return sources[startIndex]?.id ?? null;
 }
 
+function pickEnergySourceId(creep: Creep): string | null {
+  const tombId = pickTombstoneEnergyId(creep);
+  if (tombId) return tombId;
+
+  const ruinId = pickRuinEnergyId(creep);
+  if (ruinId) return ruinId;
+
+  const storage = creep.room.storage;
+  if (storage && storage.store.getUsedCapacity(RESOURCE_ENERGY) > 0) {
+    if (tryReserve(storage.id, creep.name, 15)) return storage.id;
+  }
+
+  const hubId = creep.room.memory.links?.hub;
+  if (hubId) {
+    const obj = Game.getObjectById(hubId as Id<StructureLink>);
+    if (
+      obj instanceof StructureLink &&
+      obj.store.getUsedCapacity(RESOURCE_ENERGY) > 0
+    ) {
+      if (tryReserve(obj.id, creep.name, 4)) return obj.id;
+    }
+  }
+
+  const containers = StructureCache.getStructures(
+    creep.room,
+    STRUCTURE_CONTAINER,
+  ) as StructureContainer[];
+  let best: StructureContainer | null = null;
+  let bestRange = 999;
+  for (const c of containers) {
+    if (c.store.getUsedCapacity(RESOURCE_ENERGY) <= 0) continue;
+    const range = creep.pos.getRangeTo(c);
+    if (range < bestRange) {
+      bestRange = range;
+      best = c;
+    }
+  }
+  if (best && tryReserve(best.id, creep.name, 2)) return best.id;
+
+  return null;
+}
+
+function pickUpgraderEnergySourceId(creep: Creep): string | null {
+  const controllerLink = creep.room.memory.links?.controller;
+  if (controllerLink) {
+    const link = Game.getObjectById(controllerLink as Id<StructureLink>);
+    if (link && link.store.getUsedCapacity(RESOURCE_ENERGY) > 0) {
+      if (tryReserve(link.id, creep.name, 4)) return link.id;
+    }
+  }
+
+  const tombId = pickTombstoneEnergyId(creep);
+  if (tombId) return tombId;
+
+  const ruinId = pickRuinEnergyId(creep);
+  if (ruinId) return ruinId;
+
+  const storage = creep.room.storage;
+  if (storage && storage.store.getUsedCapacity(RESOURCE_ENERGY) > 0) {
+    if (tryReserve(storage.id, creep.name, 15)) return storage.id;
+  }
+
+  const containers = StructureCache.getStructures(
+    creep.room,
+    STRUCTURE_CONTAINER,
+  ) as StructureContainer[];
+  let best: StructureContainer | null = null;
+  let bestRange = 999;
+  for (const c of containers) {
+    if (c.store.getUsedCapacity(RESOURCE_ENERGY) <= 0) continue;
+    const range = creep.pos.getRangeTo(c);
+    if (range < bestRange) {
+      bestRange = range;
+      best = c;
+    }
+  }
+  if (best && tryReserve(best.id, creep.name, 2)) return best.id;
+
+  const sources = StructureCache.getSources(creep.room);
+  const activeSources = sources.filter((s) => s.energy > 0);
+  if (activeSources.length > 0) {
+    return activeSources[0].id;
+  }
+
+  return null;
+}
+
+function assignUpgraderTask(
+  creep: Creep,
+): { type: SupportedTask; targetId?: string } | null {
+  const used = creep.store.getUsedCapacity(RESOURCE_ENERGY);
+  const free = creep.store.getFreeCapacity(RESOURCE_ENERGY);
+
+  if (used === 0) creep.memory.working = false;
+  if (free === 0) creep.memory.working = true;
+
+  if (creep.memory.working) {
+    const storageEnergy =
+      creep.room.storage?.store.getUsedCapacity(RESOURCE_ENERGY) ?? 0;
+    const energyHealthy =
+      storageEnergy > 2000 ||
+      creep.room.energyAvailable > creep.room.energyCapacityAvailable * 0.3;
+    const ticksToDowngrade = creep.room.controller?.ticksToDowngrade ?? 10000;
+
+    if (!energyHealthy && ticksToDowngrade > 2000) {
+      return null;
+    }
+
+    return { type: "upgrade" };
+  } else {
+    const sourceId = pickUpgraderEnergySourceId(creep);
+    if (!sourceId) return null;
+
+    const obj = Game.getObjectById(sourceId as Id<Source | Structure>);
+    if (obj instanceof Source) return { type: "harvest", targetId: sourceId };
+    return { type: "withdraw", targetId: sourceId };
+  }
+}
+
 function assignTask(
   creep: Creep,
   assigned: Record<string, number>,
@@ -257,6 +471,9 @@ function assignTask(
 ): { type: SupportedTask; targetId?: string } | null {
   const used = creep.store.getUsedCapacity(RESOURCE_ENERGY);
   const free = creep.store.getFreeCapacity(RESOURCE_ENERGY);
+
+  if (used === 0) creep.memory.working = false;
+  if (free === 0) creep.memory.working = true;
 
   const ticksToDowngrade = creep.room.controller?.ticksToDowngrade;
   if (
@@ -267,63 +484,31 @@ function assignTask(
     return { type: "upgrade" };
   }
 
-  if (free > 0 && used === 0) {
+  if (!creep.memory.working) {
+    const dropId = pickDroppedEnergyId(creep);
+    if (dropId) return { type: "pickup", targetId: dropId };
+    const energyId = pickEnergySourceId(creep);
+    if (energyId) return { type: "withdraw", targetId: energyId };
     const sourceId = pickSourceId(creep, assigned);
     if (!sourceId) return null;
     assigned[sourceId] = (assigned[sourceId] ?? 0) + 1;
     return { type: "harvest", targetId: sourceId };
   }
 
-  const needsRefill =
-    creep.room.find(FIND_MY_SPAWNS, {
-      filter: (s) => s.store.getFreeCapacity(RESOURCE_ENERGY) > 0,
-    }).length > 0 ||
-    creep.room.find(FIND_MY_STRUCTURES, {
-      filter: (s) =>
-        s.structureType === STRUCTURE_EXTENSION &&
-        (s as StructureExtension).store.getFreeCapacity(RESOURCE_ENERGY) > 0,
-    }).length > 0;
+  const needsRefill = roomNeedsRefill(creep.room);
 
-  if (used > 0 && needsRefill) {
+  if (needsRefill) {
     const targetId = pickEnergyTargetId(creep);
     if (!targetId) return { type: "upgrade" };
-    if ((assigned[targetId] ?? 0) >= 1) {
-      const siteId = pickConstructionSiteId(creep, assigned);
-      if (siteId) {
-        assigned[siteId] = (assigned[siteId] ?? 0) + 1;
-        return { type: "build", targetId: siteId };
-      }
-      return { type: "upgrade" };
-    }
-    assigned[targetId] = (assigned[targetId] ?? 0) + 1;
     return { type: "transfer", targetId };
   }
 
-  if (used > 0 && !needsRefill) {
-    if (
-      ticksToDowngrade != null &&
-      ticksToDowngrade < config.CONTROLLER.DOWNGRADE_LOW &&
-      counts.upgrade < 1
-    ) {
-      return { type: "upgrade" };
-    }
-    const siteId = pickConstructionSiteId(creep, assigned);
-    if (siteId) {
-      assigned[siteId] = (assigned[siteId] ?? 0) + 1;
-      return { type: "build", targetId: siteId };
-    }
+  if (
+    ticksToDowngrade != null &&
+    ticksToDowngrade < config.CONTROLLER.DOWNGRADE_LOW &&
+    counts.upgrade < 1
+  ) {
     return { type: "upgrade" };
-  }
-  if (used === 0)
-    return {
-      type: "harvest",
-      targetId: pickSourceId(creep, assigned) ?? undefined,
-    };
-
-  const targetId = pickEnergyTargetId(creep);
-  if (targetId && (assigned[targetId] ?? 0) < 1) {
-    assigned[targetId] = (assigned[targetId] ?? 0) + 1;
-    return { type: "transfer", targetId };
   }
   const siteId = pickConstructionSiteId(creep, assigned);
   if (siteId) {
@@ -338,24 +523,98 @@ export class RoomLogisticsProcess extends Process {
     for (const room of getMyRooms()) {
       const assigned: Record<string, number> = {};
       const counts = { upgrade: 0, build: 0 };
-      const creeps = room.find(FIND_MY_CREEPS);
-      for (const creep of creeps) {
-        const task = getTask(creep);
-        if (!task) {
-          const newTask = assignTask(creep, assigned, counts);
-          if (newTask) {
-            setTask(creep, newTask);
-            if (newTask.type === "upgrade") counts.upgrade++;
-            if (newTask.type === "build") counts.build++;
+
+      let idleWorkerCount = 0;
+
+      const workers = StructureCache.getCreeps(room, "worker");
+      for (const creep of workers) {
+        if (creep.memory.taskId) {
+          const taskPid = creep.memory.taskId;
+          if (!this.kernel.getProcessType(taskPid)) {
+            delete creep.memory.taskId;
+          } else {
+            continue;
           }
-          continue;
         }
-        if (task.targetId)
-          assigned[task.targetId] = (assigned[task.targetId] ?? 0) + 1;
-        if (task.type === "upgrade") counts.upgrade++;
-        if (task.type === "build") counts.build++;
-        runAssignedTask(creep, task);
+
+        const newTask = assignTask(creep, assigned, counts);
+        if (newTask) {
+          this.spawnTask(creep, newTask);
+          if (newTask.type === "upgrade") counts.upgrade++;
+          if (newTask.type === "build") counts.build++;
+        } else {
+          idleWorkerCount++;
+        }
       }
+
+      if (!room.memory.metrics) {
+        room.memory.metrics = {
+          idleRate: 0,
+          lastUpdate: Game.time,
+          workerCount: 0,
+          idleWorkerCount: 0,
+        };
+      }
+      const metrics = room.memory.metrics;
+      metrics.workerCount = workers.length;
+      metrics.idleWorkerCount = idleWorkerCount;
+      const currentRate =
+        workers.length > 0 ? idleWorkerCount / workers.length : 0;
+      const alpha = config.POPULATION.METRICS_ALPHA;
+      metrics.idleRate = metrics.idleRate * (1 - alpha) + currentRate * alpha;
+      metrics.lastUpdate = Game.time;
+
+      const upgraders = StructureCache.getCreeps(room, "upgrader");
+      for (const creep of upgraders) {
+        if (creep.memory.taskId) {
+          const taskPid = creep.memory.taskId;
+          if (!this.kernel.getProcessType(taskPid)) {
+            delete creep.memory.taskId;
+          } else {
+            continue;
+          }
+        }
+
+        const newTask = assignUpgraderTask(creep);
+        if (newTask) this.spawnTask(creep, newTask);
+      }
+    }
+  }
+
+  private spawnTask(creep: Creep, task: AssignedTask): void {
+    const pid = `task_${creep.name}_${Game.time}_${Math.floor(Math.random() * 1000)}`;
+    let process: Process | undefined;
+
+    const priority = 50;
+
+    switch (task.type) {
+      case "harvest":
+        process = new HarvestTask(pid, this.pid, priority);
+        break;
+      case "transfer":
+        process = new TransferTask(pid, this.pid, priority);
+        break;
+      case "upgrade":
+        process = new UpgradeTask(pid, this.pid, priority);
+        break;
+      case "build":
+        process = new BuildTask(pid, this.pid, priority);
+        break;
+      case "withdraw":
+        process = new WithdrawTask(pid, this.pid, priority);
+        break;
+      case "pickup":
+        process = new PickupTask(pid, this.pid, priority);
+        break;
+    }
+
+    if (process) {
+      this.kernel.addProcess(process);
+      const mem = this.kernel.getProcessMemory(pid);
+      mem.creepName = creep.name;
+      mem.targetId = task.targetId;
+
+      creep.memory.taskId = pid;
     }
   }
 }

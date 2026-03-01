@@ -39,6 +39,8 @@ export function recordCpuStats(stats: CpuStats): void {
 export function recordRoomStats(room: Room, maxHistory = 100): void {
   const mem = ensureStats();
   if (!mem.rooms[room.name]) mem.rooms[room.name] = { history: [] };
+  const strategy = room.memory.strategy;
+  const sources = room.find(FIND_SOURCES);
 
   const entry: RoomStatsEntry = {
     time: Game.time,
@@ -50,6 +52,10 @@ export function recordRoomStats(room: Room, maxHistory = 100): void {
     rclProgress: room.controller?.progress ?? 0,
     storage: room.storage?.store.getUsedCapacity(RESOURCE_ENERGY) ?? 0,
     enemyCount: room.find(FIND_HOSTILE_CREEPS).length,
+    mode: strategy?.mode,
+    sourceCount: sources.length,
+    idleSourceCount: strategy?.idleSourceCount,
+    minerCoverage: strategy?.minerCoverage,
   };
 
   const history = mem.rooms[room.name].history;

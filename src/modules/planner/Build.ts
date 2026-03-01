@@ -1,5 +1,6 @@
 import { config } from "../../config";
-import { LayoutName } from "./Layouts";
+import type { LayoutName } from "./Layouts";
+import { plannedStructuresForRcl } from "./Layouts";
 import { findCoreAnchor } from "./DistanceTransform";
 
 type Anchor = { x: number; y: number };
@@ -35,39 +36,31 @@ function canPlace(
 
   const pos = new RoomPosition(x, y, room.name);
   const structures = pos.lookFor(LOOK_STRUCTURES);
-  if (structures.length > 0) return false;
-
-  const sites = pos.lookFor(LOOK_CONSTRUCTION_SITES);
-  if (sites.length > 0) return false;
-
-  if (type === STRUCTURE_TOWER || type === STRUCTURE_EXTENSION) {
-    const spawn = room.find(FIND_MY_SPAWNS)[0];
-    if (spawn && spawn.pos.x === x && spawn.pos.y === y) return false;
+  
+  // Allow roads on ramparts and ramparts on anything
+  if (type === STRUCTURE_RAMPART) {
+      if (structures.some(s => s.structureType === STRUCTURE_WALL)) return false;
+      return true;
+  }
+  if (type === STRUCTURE_ROAD) {
+      if (structures.some(s => s.structureType !== STRUCTURE_RAMPART && s.structureType !== STRUCTURE_ROAD)) return false;
+      // Roads can coexist with road (redundant) and rampart
+      return true;
   }
 
-  return true;
-}
-
-function canPlaceRoad(room: Room, x: number, y: number): boolean {
-  if (!isInsideRoom(x, y)) return false;
-  const terrain = room.getTerrain();
-  if (terrain.get(x, y) === TERRAIN_MASK_WALL) return false;
-
-  const pos = new RoomPosition(x, y, room.name);
-  const structures = pos.lookFor(LOOK_STRUCTURES);
-  if (structures.some((s) => s.structureType !== STRUCTURE_ROAD)) return false;
+  // For other structures, must be empty or road/rampart
+  if (structures.length > 0) {
+      // If there's a road/rampart, we can place some things on top?
+      // Generally no, unless it's a road site on a road.
+      // But here we check if we can place a NEW structure.
+      // If there is a road, we can place rampart.
+      // If there is a rampart, we can place anything.
+      const blocker = structures.find(s => s.structureType !== STRUCTURE_RAMPART && s.structureType !== STRUCTURE_ROAD);
+      if (blocker) return false;
+  }
 
   const sites = pos.lookFor(LOOK_CONSTRUCTION_SITES);
   if (sites.length > 0) return false;
-
-  const spawn = room.find(FIND_MY_SPAWNS)[0];
-  if (spawn && spawn.pos.x === x && spawn.pos.y === y) return false;
-  if (
-    room.controller &&
-    room.controller.pos.x === x &&
-    room.controller.pos.y === y
-  )
-    return false;
 
   return true;
 }
@@ -78,81 +71,17 @@ function placeOne(
   x: number,
   y: number,
 ): boolean {
+  // Check if structure already exists
+  const pos = new RoomPosition(x, y, room.name);
+  const structures = pos.lookFor(LOOK_STRUCTURES);
+  if (structures.some(s => s.structureType === type)) return false;
+  
+  // Check if site exists
+  const sites = pos.lookFor(LOOK_CONSTRUCTION_SITES);
+  if (sites.some(s => s.structureType === type)) return false;
+
   const result = room.createConstructionSite(x, y, type);
   return result === OK;
-}
-
-function countPlanned(room: Room, type: StructureConstant): number {
-  const built = room.find(FIND_MY_STRUCTURES, {
-    filter: (s) => s.structureType === type,
-  }).length;
-  const sites = room.find(FIND_MY_CONSTRUCTION_SITES, {
-    filter: (s) => s.structureType === type,
-  }).length;
-  return built + sites;
-}
-
-function findNearestFreeAround(
-  room: Room,
-  anchor: Anchor,
-  type: BuildableStructureConstant,
-  maxRange: number,
-): Anchor | null {
-  for (let r = 0; r <= maxRange; r++) {
-    for (let dx = -r; dx <= r; dx++) {
-      const dy = r - Math.abs(dx);
-      const candidates = [
-        { x: anchor.x + dx, y: anchor.y + dy },
-        { x: anchor.x + dx, y: anchor.y - dy },
-      ];
-      for (const p of candidates) {
-        if (canPlace(room, p.x, p.y, type)) return p;
-      }
-    }
-  }
-  return null;
-}
-
-function extensionFloodFill(
-  room: Room,
-  anchor: Anchor,
-  limit: number,
-): Anchor[] {
-  const terrain = room.getTerrain();
-  const visited = new Uint8Array(50 * 50);
-  const out: Anchor[] = [];
-
-  const qx: number[] = [anchor.x];
-  const qy: number[] = [anchor.y];
-  visited[anchor.y * 50 + anchor.x] = 1;
-
-  for (let qi = 0; qi < qx.length; qi++) {
-    if (out.length >= limit) break;
-    const x = qx[qi];
-    const y = qy[qi];
-
-    const n = [
-      { x: x - 1, y },
-      { x: x + 1, y },
-      { x, y: y - 1 },
-      { x, y: y + 1 },
-    ];
-
-    for (const p of n) {
-      if (!isInsideRoom(p.x, p.y)) continue;
-      const i = p.y * 50 + p.x;
-      if (visited[i] === 1) continue;
-      visited[i] = 1;
-      if (terrain.get(p.x, p.y) !== TERRAIN_MASK_WALL) {
-        qx.push(p.x);
-        qy.push(p.y);
-      }
-    }
-
-    if (canPlace(room, x, y, STRUCTURE_EXTENSION)) out.push({ x, y });
-  }
-
-  return out;
 }
 
 function planRoad(
@@ -172,7 +101,8 @@ function planRoad(
   let placed = 0;
   for (const pos of res.path) {
     if (placed >= budget) break;
-    if (!canPlaceRoad(room, pos.x, pos.y)) continue;
+    // canPlace check logic for road is: terrain not wall, no other blocking structures
+    // placeOne handles existence check
     if (placeOne(room, STRUCTURE_ROAD, pos.x, pos.y)) placed++;
   }
   return placed;
@@ -189,51 +119,32 @@ export class Build {
     if (!room.memory.planner)
       room.memory.planner = { layout: getLayoutName(room) };
     if (!room.memory.planner.anchor) room.memory.planner.anchor = anchor;
+    
     const rcl = room.controller.level;
+    const layoutName = getLayoutName(room);
 
     const existingSites = room.find(FIND_MY_CONSTRUCTION_SITES).length;
     if (existingSites >= 10) return;
 
     let placed = 0;
     const maxPerTick = 3;
-
-    const storageLimit = CONTROLLER_STRUCTURES[STRUCTURE_STORAGE][rcl] ?? 0;
-    if (
-      storageLimit > 0 &&
-      countPlanned(room, STRUCTURE_STORAGE) < storageLimit
-    ) {
-      const pos = canPlace(room, anchor.x, anchor.y, STRUCTURE_STORAGE)
-        ? anchor
-        : findNearestFreeAround(room, anchor, STRUCTURE_STORAGE, 6);
-      if (pos && placed < maxPerTick) {
-        if (placeOne(room, STRUCTURE_STORAGE, pos.x, pos.y)) placed++;
-      }
-    }
-
-    const towerLimit = CONTROLLER_STRUCTURES[STRUCTURE_TOWER][rcl] ?? 0;
-    if (towerLimit > 0 && countPlanned(room, STRUCTURE_TOWER) < towerLimit) {
-      const pos = findNearestFreeAround(room, anchor, STRUCTURE_TOWER, 6);
-      if (pos && placed < maxPerTick) {
-        if (placeOne(room, STRUCTURE_TOWER, pos.x, pos.y)) placed++;
-      }
-    }
-
-    const extensionLimit = CONTROLLER_STRUCTURES[STRUCTURE_EXTENSION][rcl] ?? 0;
-    const extPlanned = countPlanned(room, STRUCTURE_EXTENSION);
-    const extNeeded = Math.max(0, extensionLimit - extPlanned);
-    if (extNeeded > 0 && placed < maxPerTick) {
-      const candidates = extensionFloodFill(room, anchor, extNeeded);
-      for (const p of candidates) {
+    
+    // 1. Core Layout Structures
+    const planned = plannedStructuresForRcl(layoutName, rcl);
+    
+    for (const p of planned) {
         if (placed >= maxPerTick) break;
-        if (placeOne(room, STRUCTURE_EXTENSION, p.x, p.y)) placed++;
-      }
+        const x = anchor.x + p.dx;
+        const y = anchor.y + p.dy;
+        
+        if (canPlace(room, x, y, p.type)) {
+            if (placeOne(room, p.type, x, y)) placed++;
+        }
     }
-
+    
+    // 2. Roads to Sources / Controller (if budget left)
     if (rcl >= 3 && placed < maxPerTick) {
-      const spawn = room.find(FIND_MY_SPAWNS)[0];
-      const hub = spawn
-        ? spawn.pos
-        : new RoomPosition(anchor.x, anchor.y, room.name);
+      const hub = new RoomPosition(anchor.x, anchor.y, room.name);
       const roadBudget = maxPerTick - placed;
       let roadPlaced = 0;
 

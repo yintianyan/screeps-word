@@ -35,6 +35,10 @@ declare global {
     rclProgress: number;
     storage: number;
     enemyCount: number;
+    mode?: string;
+    sourceCount?: number;
+    idleSourceCount?: number;
+    minerCoverage?: number;
   }
 
   interface RoomStatsEntry extends RoomStats {
@@ -76,7 +80,6 @@ declare global {
     stats?: StatsMemory;
     lifecycle: LifecycleMemory;
     dispatch: DispatchMemory;
-    datastore: import("./stats").DataStore;
     kernel: KernelMemory;
     _logFlood: unknown;
   }
@@ -84,6 +87,13 @@ declare global {
   interface RoomMemory {
     avoid?: unknown;
     energyLevel?: "CRITICAL" | "LOW" | "MEDIUM" | "HIGH";
+    strategy?: {
+      mode: "recover" | "economy" | "build" | "upgrade" | "defense";
+      lastEval: number;
+      lastSwitch: number;
+      minerCoverage: number;
+      idleSourceCount: number;
+    };
     remotes?: string[];
     planner?: {
       layout: "stamp" | "bunker";
@@ -111,6 +121,11 @@ declare global {
       lastScan: number;
       status: "pending" | "active" | "completed";
       targetRoom?: string;
+    };
+    labs?: {
+      inputs: string[];
+      outputs: string[];
+      reaction: string | null;
     };
     remote?: {
       [roomName: string]: {
@@ -140,6 +155,19 @@ declare global {
         };
       };
     };
+    mining?: {
+      [sourceId: string]: {
+        containerPos?: { x: number; y: number };
+        containerId?: string;
+        lastPlan?: number;
+      };
+    };
+    metrics?: {
+      idleRate: number;
+      lastUpdate: number;
+      workerCount: number;
+      idleWorkerCount: number;
+    };
   }
 
   interface Room {
@@ -151,6 +179,7 @@ declare global {
   namespace NodeJS {
     interface Global {
       log: unknown;
+      kernel: import("../core/Kernel").Kernel;
     }
   }
 }

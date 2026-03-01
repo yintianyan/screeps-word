@@ -14,7 +14,9 @@ export function runWithdraw(
   if (
     !(target instanceof StructureContainer) &&
     !(target instanceof StructureStorage) &&
-    !(target instanceof StructureLink)
+    !(target instanceof StructureLink) &&
+    !(target instanceof Tombstone) &&
+    !(target instanceof Ruin)
   )
     return { status: "failed", reason: "targetInvalid" };
 

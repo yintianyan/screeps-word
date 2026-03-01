@@ -67,7 +67,8 @@ export function runTransfer(
   }
 
   if (result === ERR_NOT_ENOUGH_RESOURCES) return { status: "failed", reason: "notEnoughResources" };
-  if (result === ERR_INVALID_TARGET || result === ERR_FULL) return { status: "failed", reason: "targetInvalid" };
+  if (result === ERR_FULL) return { status: "completed" };
+  if (result === ERR_INVALID_TARGET) return { status: "failed", reason: "targetInvalid" };
   if (result === ERR_NO_PATH) return { status: "failed", reason: "pathBlocked" };
   return { status: "failed", reason: "unknown" };
 }

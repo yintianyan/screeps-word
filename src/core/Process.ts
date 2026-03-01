@@ -1,3 +1,5 @@
+import type { Kernel } from "./Kernel";
+
 export enum ProcessStatus {
   Running = 0,
   Sleeping = 1,
@@ -15,6 +17,10 @@ export interface IProcess {
   sleep(ticks: number): void;
   suspend(): void;
   kill(): void;
+  
+  // Lifecycle hooks
+  onInit?(): void;
+  onExit?(): void;
 }
 
 export abstract class Process implements IProcess {
@@ -32,8 +38,24 @@ export abstract class Process implements IProcess {
 
   abstract run(): void;
 
-  sleep(_ticks: number): void {
+  protected get kernel(): Kernel {
+    return global.kernel;
+  }
+
+  sleep(ticks: number): void {
     this.status = ProcessStatus.Sleeping;
+    // Note: Kernel needs to handle the actual sleep timer logic
+    // We can access kernel now to register sleep if needed, but Kernel.run handles it via memory
+    if (this.kernel) {
+       // We could do this.kernel.sleepProcess(this.pid, ticks) if we had that method
+       // But currently Kernel checks memory directly.
+       // We need to update memory for sleep to work properly in Kernel.run()
+       const kMem = Memory.kernel.processTable[this.pid];
+       if (kMem) {
+           kMem.status = ProcessStatus.Sleeping;
+           kMem.sleepInfo = { start: Game.time, duration: ticks };
+       }
+    }
   }
 
   suspend(): void {
@@ -43,4 +65,8 @@ export abstract class Process implements IProcess {
   kill(): void {
     this.status = ProcessStatus.Dead;
   }
+
+  // Optional hooks for subclasses to override
+  onInit(): void {}
+  onExit(): void {}
 }

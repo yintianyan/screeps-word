@@ -39,6 +39,16 @@ function pickBuildPosNear(
   return null;
 }
 
+function findContainerNear(room: Room, pos: RoomPosition): StructureContainer | null {
+  const containers = room.find(FIND_STRUCTURES, {
+    filter: (s) => s.structureType === STRUCTURE_CONTAINER,
+  }) as StructureContainer[];
+  for (const c of containers) {
+    if (c.pos.inRangeTo(pos, 1)) return c;
+  }
+  return null;
+}
+
 function ensureLinkSites(room: Room): void {
   const rcl = room.controller?.level ?? 0;
   if (rcl < 5) return;
@@ -62,7 +72,10 @@ function ensureLinkSites(room: Room): void {
   for (const source of sources) {
     const has = links.some((l) => l.pos.inRangeTo(source.pos, 2));
     if (!has) {
-      const p = pickBuildPosNear(room, source.pos, 2);
+      const container = findContainerNear(room, source.pos);
+      const p =
+        (container && pickBuildPosNear(room, container.pos, 1)) ||
+        pickBuildPosNear(room, source.pos, 2);
       if (p) {
         room.createConstructionSite(p.x, p.y, STRUCTURE_LINK);
         return;
@@ -172,7 +185,7 @@ function runTransfers(
 
   for (const s of source) {
     if (s.cooldown > 0) continue;
-    if (s.store.getUsedCapacity(RESOURCE_ENERGY) < 400) continue;
+    if (s.store.getUsedCapacity(RESOURCE_ENERGY) < 200) continue;
 
     if (
       controller &&

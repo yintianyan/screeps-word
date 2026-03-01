@@ -9,6 +9,7 @@
   },
   "scripts": {
     "test": "jest",
+    "test:mockup": "node tests/mockup/run.js",
     "build": "rollup -c",
     "watch": "rollup -c -w",
     "lint": "eslint 'src/**/*.ts'"
@@ -38,6 +39,7 @@
     "eslint": "^9.39.2",
     "jest": "^30.2.0",
     "rollup": "^4.57.1",
+    "screeps-jest": "^2.0.3",
     "ts-jest": "^29.4.6",
     "tslib": "^2.8.1",
     "typescript": "^5.9.3"

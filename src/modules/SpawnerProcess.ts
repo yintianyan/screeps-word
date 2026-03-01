@@ -2,6 +2,9 @@ import { Process } from "../core/Process";
 import { processRegistry } from "../core/ProcessRegistry";
 import { config } from "../config";
 import { isSourceKeeperRoom } from "../utils/roomName";
+import StructureCache from "../utils/structureCache";
+import { Cache } from "../core/Cache";
+import { SpawnJob } from "./SpawnJob";
 
 function bodyCost(body: BodyPartConstant[]): number {
   let cost = 0;
@@ -41,6 +44,25 @@ function buildWorkerBody(energyCapacity: number): BodyPartConstant[] {
   return body.length > 0 ? body : [WORK, CARRY, MOVE];
 }
 
+function buildMinerBody(energyCapacity: number): BodyPartConstant[] {
+  const body: BodyPartConstant[] = [MOVE, CARRY];
+  while (
+    body.filter((p) => p === WORK).length < 5 &&
+    bodyCost(body) + BODYPART_COST[WORK] <= energyCapacity &&
+    body.length + 1 <= 12
+  ) {
+    body.unshift(WORK);
+  }
+  if (body.filter((p) => p === WORK).length === 0) {
+    const fallback: BodyPartConstant[] = [WORK, CARRY, MOVE];
+    if (bodyCost(fallback) <= energyCapacity) return fallback;
+  }
+  if (bodyCost(body) <= energyCapacity) return body;
+  const fallback: BodyPartConstant[] = [WORK, CARRY, MOVE];
+  if (bodyCost(fallback) <= energyCapacity) return fallback;
+  return [WORK, CARRY, MOVE];
+}
+
 function buildRemoteHarvesterBody(energyCapacity: number): BodyPartConstant[] {
   const body: BodyPartConstant[] = [CARRY, MOVE, MOVE];
   while (
@@ -48,6 +70,10 @@ function buildRemoteHarvesterBody(energyCapacity: number): BodyPartConstant[] {
     bodyCost(body) + 100 <= energyCapacity
   ) {
     body.unshift(WORK);
+  }
+  if (body.filter((p) => p === WORK).length === 0) {
+    const fallback: BodyPartConstant[] = [WORK, CARRY, MOVE];
+    if (bodyCost(fallback) <= energyCapacity) return fallback;
   }
   if (
     body.filter((p) => p === WORK).length >= 5 &&
@@ -114,49 +140,81 @@ function buildKeeperHealerBody(energyCapacity: number): BodyPartConstant[] {
   return body.length > 0 ? body : [MOVE, HEAL];
 }
 
+function buildUpgraderBody(energyCapacity: number): BodyPartConstant[] {
+  const body: BodyPartConstant[] = [WORK, CARRY, MOVE];
+  const unit: BodyPartConstant[] = [WORK, WORK, CARRY, MOVE];
+  const unitCost = bodyCost(unit);
+  const maxParts = 24;
+
+  while (
+    body.length + unit.length <= maxParts &&
+    bodyCost(body) + unitCost <= energyCapacity
+  ) {
+    body.push(...unit);
+  }
+  return body.length > 0 ? body : [WORK, CARRY, MOVE];
+}
+
 function desiredWorkerCount(room: Room): number {
   const rcl = room.controller?.level ?? 0;
-  let target = 0;
-  
-  if (rcl <= 1) target = 6;
-  else if (rcl <= 3) target = 8;
-  else if (rcl <= 5) target = 6;
-  else target = 4;
+  const base =
+    config.POPULATION.WORKER.RCL_TARGETS[
+      Math.min(
+        Math.max(0, rcl),
+        config.POPULATION.WORKER.RCL_TARGETS.length - 1,
+      )
+    ] ?? config.POPULATION.WORKER.MIN;
+  let target = base;
 
-  const sites = room.find(FIND_MY_CONSTRUCTION_SITES).length;
+  const sites = StructureCache.getConstructionSites(room).filter(
+    (s) => s.my,
+  ).length;
   if (sites > 0) target += 1;
   if (sites > 5 && rcl >= 4) target += 1;
 
   if (rcl >= 5) {
-    const links = room.find(FIND_MY_STRUCTURES, {
-      filter: (s) => s.structureType === STRUCTURE_LINK,
-    }).length;
-    const distributor = room.find(FIND_MY_CREEPS, {
-      filter: (c) => c.memory.role === "distributor",
-    }).length;
-    if (links >= 2) target -= 2;
-    if (distributor > 0) target -= 1;
+    const links = (
+      StructureCache.getMyStructures(room, STRUCTURE_LINK) as StructureLink[]
+    ).length;
+    const distributor = StructureCache.getCreeps(room, "distributor").length;
+    if (links >= 2) target += config.POPULATION.WORKER.LINK_REDUCE;
+    if (distributor > 0) target += config.POPULATION.WORKER.DISTRIBUTOR_REDUCE;
   }
 
-  const storageEnergy = room.storage?.store.getUsedCapacity(RESOURCE_ENERGY) ?? 0;
+  const storageEnergy =
+    room.storage?.store.getUsedCapacity(RESOURCE_ENERGY) ?? 0;
   if (room.storage) {
-    if (storageEnergy < 2000) target += 1;
-    if (rcl >= 5 && storageEnergy > 50000) target -= 1;
+    if (storageEnergy < config.POPULATION.WORKER.STORAGE_LOW)
+      target += config.POPULATION.WORKER.STORAGE_BOOST;
+    if (rcl >= 5 && storageEnergy > config.POPULATION.WORKER.STORAGE_HIGH)
+      target += config.POPULATION.WORKER.STORAGE_REDUCE;
   }
 
-  return Math.max(2, target);
-}
+  if (room.memory.metrics) {
+    const { idleRate } = room.memory.metrics;
+    if (idleRate > config.POPULATION.WORKER.IDLE_HIGH) {
+      target = Math.max(
+        config.POPULATION.WORKER.MIN,
+        target + config.POPULATION.WORKER.DELTA_IDLE,
+      );
+    } else if (
+      idleRate < config.POPULATION.WORKER.IDLE_LOW &&
+      sites >= config.POPULATION.WORKER.BUSY_SITES_MIN
+    ) {
+      target += config.POPULATION.WORKER.DELTA_BUSY;
+    }
+  }
 
-function countRole(room: Room, role: string): number {
-  return room.find(FIND_MY_CREEPS, { filter: (c) => c.memory.role === role })
-    .length;
+  return Math.max(config.POPULATION.WORKER.MIN, target);
 }
 
 function shouldSpawnDefender(room: Room): boolean {
   const hostiles = room.find(FIND_HOSTILE_CREEPS).length;
   const mem = room.memory as RoomMemory & { defenseLastHostile?: number };
   const recent =
-    mem.defenseLastHostile != null && Game.time - mem.defenseLastHostile < 50;
+    mem.defenseLastHostile != null &&
+    Game.time - mem.defenseLastHostile <
+      config.POPULATION.DEFENSE.RECENT_HOSTILE_TICKS;
   return hostiles > 0 || recent;
 }
 
@@ -166,9 +224,10 @@ function hasKeeperHostile(room: Room): boolean {
 }
 
 function canFightKeeperInRoom(room: Room): boolean {
-  const towers = room.find(FIND_MY_STRUCTURES, {
-    filter: (s) => s.structureType === STRUCTURE_TOWER,
-  }) as StructureTower[];
+  const towers = StructureCache.getMyStructures(
+    room,
+    STRUCTURE_TOWER,
+  ) as StructureTower[];
   if (towers.length === 0) return false;
   const towerEnergy = towers.reduce(
     (sum, t) => sum + t.store.getUsedCapacity(RESOURCE_ENERGY),
@@ -177,51 +236,15 @@ function canFightKeeperInRoom(room: Room): boolean {
   return towerEnergy >= 500;
 }
 
-function isOffenseBlocked(room: Room): boolean {
+function isOffenseBlocked(room: Room, defenders: number): boolean {
   const hostiles = room.find(FIND_HOSTILE_CREEPS).length;
   if (hostiles === 0) return false;
-  const towers = room.find(FIND_MY_STRUCTURES, {
-    filter: (s) => s.structureType === STRUCTURE_TOWER,
-  }) as StructureTower[];
+  const towers = StructureCache.getMyStructures(
+    room,
+    STRUCTURE_TOWER,
+  ) as StructureTower[];
   if (towers.length > 0) return false;
-  const defenders = room.find(FIND_MY_CREEPS, {
-    filter: (c) => c.memory.role === "defender",
-  }).length;
   return defenders === 0;
-}
-
-function countAssigned(
-  role: string,
-  homeRoom: string,
-  targetRoom: string,
-): number {
-  return Object.values(Game.creeps).filter(
-    (c) =>
-      c.memory.role === role &&
-      c.memory.homeRoom === homeRoom &&
-      c.memory.targetRoom === targetRoom,
-  ).length;
-}
-
-function isKeeperSquadReady(homeRoom: string, targetRoom: string): boolean {
-  const killers = Object.values(Game.creeps).filter(
-    (c) =>
-      c.memory.role === "keeperKiller" &&
-      c.memory.homeRoom === homeRoom &&
-      c.memory.targetRoom === targetRoom &&
-      c.room.name === targetRoom,
-  ).length;
-  const healers = Object.values(Game.creeps).filter(
-    (c) =>
-      c.memory.role === "keeperHealer" &&
-      c.memory.homeRoom === homeRoom &&
-      c.memory.targetRoom === targetRoom &&
-      c.room.name === targetRoom,
-  ).length;
-  return (
-    killers >= config.REMOTE_MINING.KEEPER_SQUAD.KILLERS &&
-    healers >= config.REMOTE_MINING.KEEPER_SQUAD.HEALERS
-  );
 }
 
 function getRemoteTargets(room: Room): string[] {
@@ -236,37 +259,268 @@ function canRunSkRemote(home: Room): boolean {
   return true;
 }
 
-function getAllowedRemoteTargets(room: Room): string[] {
-  const remotes = getRemoteTargets(room);
-  if (remotes.length === 0) return remotes;
-  return remotes.filter((r) => {
-    if (isSourceKeeperRoom(r) && !canRunSkRemote(room)) return false;
-    const hasKeeper = room.memory.remote?.[r]?.threat?.hasKeeper ?? false;
-    if (hasKeeper && !isKeeperSquadReady(room.name, r)) return false;
-    return true;
-  });
+function getStringProp(value: unknown, prop: string): string | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const v = (value as Record<string, unknown>)[prop];
+  return typeof v === "string" ? v : undefined;
+}
+
+interface ActiveJob {
+  pid: string;
+  role: string;
+  room: string;
+  targetRoom?: string;
+}
+
+function getSpawnEnergyBudget(room: Room, isCritical: boolean): number {
+  const capacity = room.energyCapacityAvailable;
+  const available = room.energyAvailable;
+
+  if (isCritical) {
+    return Math.max(config.POPULATION.ENERGY_BUDGET.CRITICAL_MIN, available);
+  }
+
+  if (available < capacity * config.POPULATION.ENERGY_BUDGET.LOW_RATIO) {
+    return Math.max(
+      available,
+      capacity * config.POPULATION.ENERGY_BUDGET.MID_RATIO,
+    );
+  }
+
+  return capacity;
 }
 
 export class SpawnerProcess extends Process {
   public run(): void {
+    const children = this.kernel.getChildren(this.pid);
+    const activeJobs: ActiveJob[] = children.map((pid) => {
+      const mem = this.kernel.getProcessMemory(pid);
+      return {
+        pid,
+        role: mem.role as string,
+        room: mem.roomName as string,
+        targetRoom: getStringProp(mem.memory as unknown, "targetRoom"),
+      };
+    });
+
     for (const roomName in Game.rooms) {
       const room = Game.rooms[roomName];
       if (!room.controller?.my) continue;
 
-      const creeps = room.find(FIND_MY_CREEPS);
-      const workerCount = creeps.filter((c) => c.memory.role === "worker").length;
-      const spawns = room.find(FIND_MY_SPAWNS);
-      const spawn = spawns.find((s) => !s.spawning);
-      if (!spawn) continue;
+      const creeps = StructureCache.getCreeps(room);
 
-      if (creeps.length < 2) {
-        const body = [WORK, CARRY, MOVE];
-        if (room.energyAvailable < bodyCost(body)) continue;
-        const name = `W_${room.name}_${Game.time}`;
-        spawn.spawnCreep(body, name, {
-          memory: { role: "worker", room: room.name, working: false },
+      const count = (role: string) => {
+        return (
+          creeps.filter((c) => c.memory.role === role).length +
+          activeJobs.filter((j) => j.role === role && j.room === roomName)
+            .length
+        );
+      };
+
+      const getDyingCount = (role: string, bodyPartsCount: number) => {
+        const spawnTime = bodyPartsCount * 3;
+        const buffer = config.SPAWN.REPLACE_BUFFER;
+        return creeps.filter(
+          (c) =>
+            c.memory.role === role &&
+            (c.ticksToLive ?? 1500) < spawnTime + buffer,
+        ).length;
+      };
+
+      const workerCount = count("worker");
+      const minerCount = count("miner");
+      const haulerCount = count("hauler");
+      const actualWorkerCount = creeps.filter(
+        (c) => c.memory.role === "worker",
+      ).length;
+      const actualMinerCount = creeps.filter(
+        (c) => c.memory.role === "miner",
+      ).length;
+      const lowBucket =
+        Game.cpu.bucket < config.POPULATION.CPU_BUCKET_STOP_NON_CRITICAL;
+      const mode = room.memory.strategy?.mode;
+      const rcl = room.controller.level;
+      const roomJobs = activeJobs.filter((j) => j.room === roomName);
+
+      if (creeps.length < 2 && workerCount === 0) {
+        const minBody = [WORK, CARRY, MOVE];
+        const minCost = bodyCost(minBody);
+
+        if (room.energyAvailable >= minCost) {
+          console.log(
+            `[Spawner] EMERGENCY: Requesting recovery worker for ${room.name}`,
+          );
+          this.requestSpawn(room.name, "worker", minBody, 100, {
+            room: room.name,
+            working: false,
+          });
+          continue;
+        }
+      }
+
+      if (mode === "recover" && rcl >= 3) {
+        const sources = StructureCache.getSources(room);
+        if (sources.length > 0) {
+          const minerBodySize = buildMinerBody(
+            room.energyCapacityAvailable,
+          ).length;
+          const dyingMiners = getDyingCount("miner", minerBodySize);
+          const minerJobs = roomJobs.filter((j) => j.role === "miner").length;
+
+          if (actualMinerCount - dyingMiners < sources.length) {
+            if (roomJobs.length > 0) {
+              for (const j of roomJobs) {
+                if (j.role === "miner" || j.role === "defender") continue;
+                if (j.role === "worker" && actualWorkerCount === 0) continue;
+                this.kernel.killProcess(j.pid);
+              }
+            }
+
+            if (minerJobs > 0) continue;
+
+            const body = buildMinerBody(getSpawnEnergyBudget(room, true));
+            const isAssigned = (sourceId: string) => {
+              const hasCreep = creeps.some((c) => {
+                if (c.memory.role !== "miner" || c.memory.sourceId !== sourceId)
+                  return false;
+                if (
+                  (c.ticksToLive ?? 1500) <
+                  body.length * 3 + config.SPAWN.REPLACE_BUFFER
+                )
+                  return false;
+                return true;
+              });
+              if (hasCreep) return true;
+
+              const jobs = activeJobs.filter(
+                (j) => j.role === "miner" && j.room === roomName,
+              );
+              for (const j of jobs) {
+                const m = this.kernel.getProcessMemory(j.pid);
+                if (getStringProp(m.memory as unknown, "sourceId") === sourceId)
+                  return true;
+              }
+              return false;
+            };
+
+            const unassignedSource = sources.find((s) => !isAssigned(s.id));
+            if (unassignedSource) {
+              this.requestSpawn(room.name, "miner", body, 105, {
+                role: "miner",
+                room: room.name,
+                working: false,
+                homeRoom: room.name,
+                sourceId: unassignedSource.id,
+              });
+            }
+            continue;
+          }
+        }
+      }
+
+      if (rcl >= 3) {
+        const sources = StructureCache.getSources(room);
+        const planned = room.memory.mining ?? {};
+        const plannedSources = sources.filter(
+          (s) => planned[s.id]?.containerPos != null,
+        );
+
+        const minerTarget = sources.length;
+        const minerBodySize = buildMinerBody(
+          room.energyCapacityAvailable,
+        ).length;
+        const dyingMiners = getDyingCount("miner", minerBodySize);
+
+        if (actualMinerCount - dyingMiners < minerTarget) {
+          const minerJobs = roomJobs.filter((j) => j.role === "miner").length;
+          if (roomJobs.length > 0) {
+            for (const j of roomJobs) {
+              if (j.role === "miner" || j.role === "defender") continue;
+              if (j.role === "worker" && actualWorkerCount === 0) continue;
+              this.kernel.killProcess(j.pid);
+            }
+          }
+
+          if (minerJobs > 0) continue;
+
+          const body = buildMinerBody(getSpawnEnergyBudget(room, true));
+          const isAssigned = (sourceId: string) => {
+            const hasCreep = creeps.some((c) => {
+              if (c.memory.role !== "miner" || c.memory.sourceId !== sourceId)
+                return false;
+              if (
+                (c.ticksToLive ?? 1500) <
+                body.length * 3 + config.SPAWN.REPLACE_BUFFER
+              )
+                return false;
+              return true;
+            });
+            if (hasCreep) return true;
+
+            const jobs = activeJobs.filter(
+              (j) => j.role === "miner" && j.room === roomName,
+            );
+            for (const j of jobs) {
+              const m = this.kernel.getProcessMemory(j.pid);
+              if (getStringProp(m.memory as unknown, "sourceId") === sourceId)
+                return true;
+            }
+            return false;
+          };
+
+          const unassignedSource =
+            plannedSources.find((s) => !isAssigned(s.id)) ??
+            sources.find((s) => !isAssigned(s.id));
+          if (unassignedSource) {
+            this.requestSpawn(room.name, "miner", body, 105, {
+              role: "miner",
+              room: room.name,
+              working: false,
+              homeRoom: room.name,
+              sourceId: unassignedSource.id,
+            });
+            continue;
+          }
+        }
+      }
+
+      const target = desiredWorkerCount(room);
+
+      const workerBodySize = buildWorkerBody(
+        room.energyCapacityAvailable,
+      ).length;
+      const effectiveWorkerCount =
+        workerCount - getDyingCount("worker", workerBodySize);
+
+      if (effectiveWorkerCount < target) {
+        const recoveryThreshold = target * 0.8;
+        const isRecovery = effectiveWorkerCount < recoveryThreshold;
+        const energyBudget = getSpawnEnergyBudget(room, isRecovery);
+
+        const body = buildWorkerBody(energyBudget);
+
+        this.requestSpawn(room.name, "worker", body, 90, {
+          room: room.name,
+          working: false,
         });
         continue;
+      }
+
+      if (rcl >= 3 && minerCount > 0 && haulerCount === 0) {
+        const body = buildCarryMoveBody(room.energyAvailable);
+        const sources = room.find(FIND_SOURCES);
+        const sourceId = sources[0]?.id;
+        if (sourceId) {
+          this.requestSpawn(room.name, "hauler", body, 92, {
+            role: "hauler",
+            room: room.name,
+            working: false,
+            homeRoom: room.name,
+            sourceId,
+            hauling: false,
+          });
+          continue;
+        }
       }
 
       if (hasKeeperHostile(room) && !canFightKeeperInRoom(room)) {
@@ -277,164 +531,371 @@ export class SpawnerProcess extends Process {
         const hostiles = room.find(FIND_HOSTILE_CREEPS).length;
         const desiredDefenders =
           hostiles > 0 ? Math.min(3, Math.max(1, hostiles)) : 1;
-        if (countRole(room, "defender") < desiredDefenders) {
-          const body = buildDefenderBody(room.energyCapacityAvailable);
-          const cost = bodyCost(body);
-          if (room.energyAvailable < cost) continue;
-          const name = `D_${room.name}_${Game.time}`;
-          spawn.spawnCreep(body, name, {
-            memory: {
-              role: "defender",
+        const defenderCount = count("defender");
+
+        if (defenderCount < desiredDefenders) {
+          const body = buildDefenderBody(getSpawnEnergyBudget(room, true));
+          this.requestSpawn(room.name, "defender", body, 95, {
+            role: "defender",
+            room: room.name,
+            working: false,
+            homeRoom: room.name,
+          });
+          continue;
+        }
+      }
+
+      const storageEnergy =
+        room.storage?.store.getUsedCapacity(RESOURCE_ENERGY) ?? 0;
+      const hubId = room.memory.links?.hub;
+      const hubObj = hubId
+        ? Game.getObjectById(hubId as Id<StructureLink>)
+        : null;
+      const hub = hubObj instanceof StructureLink ? hubObj : null;
+      const hubEnergy = hub?.store.getUsedCapacity(RESOURCE_ENERGY) ?? 0;
+      const energyTight =
+        room.energyAvailable <
+        room.energyCapacityAvailable *
+          config.POPULATION.ENERGY_BUDGET.LOW_RATIO;
+
+      const canSpawnDistributor =
+        mode !== "recover" &&
+        !energyTight &&
+        room.controller.level >= 4 &&
+        (storageEnergy > config.POPULATION.DISTRIBUTOR.STORAGE_MIN_FOR_SPAWN ||
+          hubEnergy > 200);
+
+      if (canSpawnDistributor) {
+        const distTarget =
+          hub &&
+          storageEnergy > config.POPULATION.DISTRIBUTOR.STORAGE_MIN_FOR_BIG
+            ? 2
+            : 1;
+        const distBodySize = buildCarryMoveBody(
+          room.energyCapacityAvailable,
+        ).length;
+        const effectiveDistCount =
+          count("distributor") - getDyingCount("distributor", distBodySize);
+
+        if (effectiveDistCount < distTarget) {
+          let budget = getSpawnEnergyBudget(room, false);
+          if (
+            room.storage &&
+            room.storage.store.energy <
+              config.POPULATION.DISTRIBUTOR.STORAGE_MIN_FOR_BIG
+          ) {
+            budget = Math.min(
+              budget,
+              Math.max(
+                config.POPULATION.DISTRIBUTOR.MIN_BUDGET,
+                room.storage.store.energy /
+                  config.POPULATION.DISTRIBUTOR.STORAGE_BUDGET_DIVISOR,
+              ),
+            );
+          }
+
+          const body = buildCarryMoveBody(budget);
+          this.requestSpawn(room.name, "distributor", body, 65, {
+            role: "distributor",
+            room: room.name,
+            working: false,
+            homeRoom: room.name,
+          });
+          continue;
+        }
+      }
+
+      if (!lowBucket && mode !== "recover" && room.controller.level >= 3) {
+        const upgraderCount = count("upgrader");
+        let desiredUpgraders = 0;
+
+        const energyHealthy =
+          storageEnergy > config.POPULATION.UPGRADER.STORAGE_HEALTHY ||
+          room.energyAvailable >
+            room.energyCapacityAvailable *
+              config.POPULATION.UPGRADER.AVAILABLE_HEALTHY_RATIO;
+
+        if (workerCount >= target && energyHealthy) {
+          if (room.controller.level === 8) {
+            desiredUpgraders = 1;
+          } else if (storageEnergy > config.POPULATION.UPGRADER.STORAGE_RICH) {
+            desiredUpgraders = config.POPULATION.UPGRADER.COUNT_RICH;
+          } else if (
+            storageEnergy > config.POPULATION.UPGRADER.STORAGE_MEDIUM ||
+            room.memory.mining
+          ) {
+            desiredUpgraders = config.POPULATION.UPGRADER.COUNT_MEDIUM;
+          } else {
+            desiredUpgraders = config.POPULATION.UPGRADER.COUNT_LOW;
+          }
+
+          if (
+            room.energyAvailable <
+              room.energyCapacityAvailable *
+                config.POPULATION.UPGRADER.THROTTLE_RATIO &&
+            desiredUpgraders > 1
+          ) {
+            desiredUpgraders = config.POPULATION.UPGRADER.COUNT_LOW;
+          }
+        } else {
+          desiredUpgraders = 0;
+        }
+
+        const upgraderBodySize = buildUpgraderBody(
+          room.energyCapacityAvailable,
+        ).length;
+        const effectiveUpgraderCount =
+          upgraderCount - getDyingCount("upgrader", upgraderBodySize);
+
+        if (effectiveUpgraderCount < desiredUpgraders) {
+          const body = buildUpgraderBody(getSpawnEnergyBudget(room, false));
+          this.requestSpawn(room.name, "upgrader", body, 50, {
+            role: "upgrader",
+            room: room.name,
+            working: false,
+            homeRoom: room.name,
+          });
+          continue;
+        }
+      }
+
+      if (room.controller.level >= 3) {
+        const sources = StructureCache.getSources(room);
+
+        let haulerTarget = 0;
+        if (rcl < 4 || !room.storage)
+          haulerTarget = Math.max(1, sources.length);
+        else {
+          const hub = room.memory.links?.hub;
+          const sourceLinks = room.memory.links?.source ?? [];
+          const okLink = rcl >= 5 && !!hub && sourceLinks.length >= 1;
+          haulerTarget = okLink ? 1 : 1;
+        }
+
+        const haulerBodySize = buildCarryMoveBody(
+          room.energyCapacityAvailable,
+        ).length;
+        const effectiveHaulerCount =
+          haulerCount - getDyingCount("hauler", haulerBodySize);
+
+        if (effectiveHaulerCount < haulerTarget) {
+          const body = buildCarryMoveBody(getSpawnEnergyBudget(room, false));
+
+          const idx = haulerCount % sources.length;
+          const sourceId = sources[idx]?.id;
+
+          if (sourceId) {
+            this.requestSpawn(room.name, "hauler", body, 80, {
+              role: "hauler",
               room: room.name,
               working: false,
               homeRoom: room.name,
-            },
+              sourceId,
+              hauling: false,
+            });
+            continue;
+          }
+        }
+      }
+
+      if (!lowBucket && mode !== "recover") {
+        const scoutTarget =
+          room.memory.scout?.status === "active"
+            ? room.memory.scout.targetRoom
+            : undefined;
+        if (scoutTarget && count("scout") < 1) {
+          const body: BodyPartConstant[] = [MOVE];
+          this.requestSpawn(room.name, "scout", body, 60, {
+            role: "scout",
+            room: room.name,
+            working: false,
+            homeRoom: room.name,
+            targetRoom: scoutTarget,
           });
           continue;
         }
       }
 
       if (
-        room.controller.level >= 4 &&
-        room.storage &&
-        countRole(room, "distributor") < 1
+        !lowBucket &&
+        mode !== "recover" &&
+        !isOffenseBlocked(room, count("defender"))
       ) {
-        const body = buildCarryMoveBody(room.energyCapacityAvailable);
-        const cost = bodyCost(body);
-        if (room.energyAvailable < cost) continue;
-        const name = `DI_${room.name}_${Game.time}`;
-        spawn.spawnCreep(body, name, {
-          memory: {
-            role: "distributor",
-            room: room.name,
-            working: false,
-            homeRoom: room.name,
-          },
-        });
-        continue;
-      }
-
-      const scoutTarget =
-        room.memory.scout?.status === "active" ? room.memory.scout.targetRoom : undefined;
-      if (scoutTarget && countRole(room, "scout") < 1) {
-        const body: BodyPartConstant[] = [MOVE];
-        const cost = bodyCost(body);
-        if (room.energyAvailable < cost) continue;
-        const name = `S_${room.name}_${Game.time}`;
-        spawn.spawnCreep(body, name, {
-          memory: {
-            role: "scout",
-            room: room.name,
-            working: false,
-            homeRoom: room.name,
-            targetRoom: scoutTarget,
-          },
-        });
-        continue;
-      }
-
-      if (!isOffenseBlocked(room)) {
         const remotesAll = getRemoteTargets(room);
         const needsKeeperSquad = remotesAll.find(
           (r) => room.memory.remote?.[r]?.threat?.hasKeeper,
         );
-        if (
-          needsKeeperSquad &&
-          canRunSkRemote(room) &&
-          !isKeeperSquadReady(room.name, needsKeeperSquad)
-        ) {
-           const killers = countAssigned("keeperKiller", room.name, needsKeeperSquad);
-           const healers = countAssigned("keeperHealer", room.name, needsKeeperSquad);
-           
-           if (killers < config.REMOTE_MINING.KEEPER_SQUAD.KILLERS) {
-              const body = buildKeeperKillerBody(room.energyCapacityAvailable);
-              if (room.energyAvailable >= bodyCost(body)) {
-                 spawn.spawnCreep(body, `KK_${room.name}_${Game.time}`, {
-                    memory: { role: "keeperKiller", room: room.name, working: false, homeRoom: room.name, targetRoom: needsKeeperSquad }
-                 });
-              }
+
+        const remoteCreepCounts = Cache.getTick("sp:remoteCreepCounts", () => {
+          const m = new Map<string, number>();
+          const all = Object.values(Game.creeps);
+          for (const c of all) {
+            const role = c.memory.role;
+            const home = c.memory.homeRoom;
+            const target = c.memory.targetRoom;
+            if (
+              typeof role !== "string" ||
+              typeof home !== "string" ||
+              typeof target !== "string"
+            )
               continue;
-           }
-           if (healers < config.REMOTE_MINING.KEEPER_SQUAD.HEALERS) {
-              const body = buildKeeperHealerBody(room.energyCapacityAvailable);
-              if (room.energyAvailable >= bodyCost(body)) {
-                 spawn.spawnCreep(body, `KH_${room.name}_${Game.time}`, {
-                    memory: { role: "keeperHealer", room: room.name, working: false, homeRoom: room.name, targetRoom: needsKeeperSquad }
-                 });
-              }
+            const k = `${home}|${role}|${target}`;
+            m.set(k, (m.get(k) ?? 0) + 1);
+          }
+          return m;
+        });
+
+        const countAssigned = (role: string, targetRoom: string) => {
+          const k = `${roomName}|${role}|${targetRoom}`;
+          const cCount = remoteCreepCounts.get(k) ?? 0;
+          const jCount = activeJobs.filter(
+            (j) =>
+              j.role === role &&
+              j.room === roomName &&
+              j.targetRoom === targetRoom,
+          ).length;
+          return cCount + jCount;
+        };
+
+        if (needsKeeperSquad && canRunSkRemote(room)) {
+          const killers = countAssigned("keeperKiller", needsKeeperSquad);
+          const healers = countAssigned("keeperHealer", needsKeeperSquad);
+
+          if (killers < config.REMOTE_MINING.KEEPER_SQUAD.KILLERS) {
+            if (
+              getSpawnEnergyBudget(room, false) <
+              room.energyCapacityAvailable * 0.9
+            )
               continue;
-           }
+
+            const body = buildKeeperKillerBody(room.energyCapacityAvailable);
+            this.requestSpawn(room.name, "keeperKiller", body, 75, {
+              role: "keeperKiller",
+              room: room.name,
+              working: false,
+              homeRoom: room.name,
+              targetRoom: needsKeeperSquad,
+            });
+            continue;
+          }
+          if (healers < config.REMOTE_MINING.KEEPER_SQUAD.HEALERS) {
+            if (
+              getSpawnEnergyBudget(room, false) <
+              room.energyCapacityAvailable * 0.9
+            )
+              continue;
+
+            const body = buildKeeperHealerBody(room.energyCapacityAvailable);
+            this.requestSpawn(room.name, "keeperHealer", body, 75, {
+              role: "keeperHealer",
+              room: room.name,
+              working: false,
+              homeRoom: room.name,
+              targetRoom: needsKeeperSquad,
+            });
+            continue;
+          }
         }
-        
-        const remotes = getAllowedRemoteTargets(room);
+
+        const allowedRemotes = getRemoteTargets(room).filter((r) => {
+          if (isSourceKeeperRoom(r) && !canRunSkRemote(room)) return false;
+          if (isSourceKeeperRoom(r)) {
+            const killers = countAssigned("keeperKiller", r);
+            const healers = countAssigned("keeperHealer", r);
+            if (killers < 1 || healers < 1) return false;
+          }
+          return true;
+        });
+
         let spawnedRemote = false;
-        
-        for (const remote of remotes) {
-           if (room.controller.level >= 3) {
-              const reservers = countAssigned("reserver", room.name, remote);
-              if (reservers < 1) {
-                 const body = buildReserverBody(room.energyCapacityAvailable);
-                 if (room.energyAvailable >= bodyCost(body)) {
-                    spawn.spawnCreep(body, `R_${room.name}_${Game.time}`, {
-                       memory: { role: "reserver", room: room.name, working: false, homeRoom: room.name, targetRoom: remote }
-                    });
-                    spawnedRemote = true;
-                    break;
-                 }
-              }
-           }
-           
-           const harvesters = countAssigned("remoteHarvester", room.name, remote);
-           const sourceCount = room.memory.remote?.[remote]?.stats?.sourceCount ?? 1;
-           if (harvesters < sourceCount) {
-              const body = buildRemoteHarvesterBody(room.energyCapacityAvailable);
-              if (room.energyAvailable >= bodyCost(body)) {
-                 spawn.spawnCreep(body, `RH_${room.name}_${Game.time}`, {
-                    memory: { role: "remoteHarvester", room: room.name, working: false, homeRoom: room.name, targetRoom: remote }
-                 });
-                 spawnedRemote = true;
-                 break;
-              }
-           }
-           
-           const haulers = countAssigned("remoteHauler", room.name, remote);
-           const stats = room.memory.remote?.[remote]?.stats;
-           let desiredHaulers = 1;
-           if (stats && stats.neededCarryParts > 0) {
-              const sampleBody = buildCarryMoveBody(room.energyCapacityAvailable);
-              const carryParts = sampleBody.filter(p => p === CARRY).length;
-              if (carryParts > 0) {
-                 desiredHaulers = Math.ceil(stats.neededCarryParts / carryParts);
-              }
-           }
-           desiredHaulers = Math.min(desiredHaulers, 5); 
-           
-           if (haulers < desiredHaulers) {
-               const body = buildCarryMoveBody(room.energyCapacityAvailable);
-               if (room.energyAvailable >= bodyCost(body)) {
-                  spawn.spawnCreep(body, `RHl_${room.name}_${Game.time}`, {
-                     memory: { role: "remoteHauler", room: room.name, working: false, homeRoom: room.name, targetRoom: remote, hauling: false }
-                  });
-                  spawnedRemote = true;
-                  break;
-               }
-           }
+
+        for (const remote of allowedRemotes) {
+          if (room.controller.level >= 3) {
+            const reservers = countAssigned("reserver", remote);
+            if (reservers < 1) {
+              const body = buildReserverBody(getSpawnEnergyBudget(room, false));
+              this.requestSpawn(room.name, "reserver", body, 40, {
+                role: "reserver",
+                room: room.name,
+                working: false,
+                homeRoom: room.name,
+                targetRoom: remote,
+              });
+              spawnedRemote = true;
+              break;
+            }
+          }
+
+          const harvesters = countAssigned("remoteHarvester", remote);
+          const sourceCount =
+            room.memory.remote?.[remote]?.stats?.sourceCount ?? 1;
+          if (harvesters < sourceCount) {
+            const body = buildRemoteHarvesterBody(
+              getSpawnEnergyBudget(room, false),
+            );
+            this.requestSpawn(room.name, "remoteHarvester", body, 35, {
+              role: "remoteHarvester",
+              room: room.name,
+              working: false,
+              homeRoom: room.name,
+              targetRoom: remote,
+            });
+            spawnedRemote = true;
+            break;
+          }
+
+          const haulers = countAssigned("remoteHauler", remote);
+          const stats = room.memory.remote?.[remote]?.stats;
+          let desiredHaulers = 1;
+          if (stats && stats.neededCarryParts > 0) {
+            const budget = getSpawnEnergyBudget(room, false);
+            const sampleBody = buildCarryMoveBody(budget);
+            const carryParts = sampleBody.filter((p) => p === CARRY).length;
+            if (carryParts > 0) {
+              desiredHaulers = Math.ceil(stats.neededCarryParts / carryParts);
+            }
+          }
+          desiredHaulers = Math.min(desiredHaulers, 5);
+
+          if (haulers < desiredHaulers) {
+            const body = buildCarryMoveBody(getSpawnEnergyBudget(room, false));
+            this.requestSpawn(room.name, "remoteHauler", body, 30, {
+              role: "remoteHauler",
+              room: room.name,
+              working: false,
+              homeRoom: room.name,
+              targetRoom: remote,
+              hauling: false,
+            });
+            spawnedRemote = true;
+            break;
+          }
         }
-        
+
         if (spawnedRemote) continue;
       }
-
-      const target = desiredWorkerCount(room);
-      if (workerCount >= target) continue;
-      const body = buildWorkerBody(room.energyCapacityAvailable);
-      const cost = bodyCost(body);
-      if (room.energyAvailable < cost) continue;
-
-      const name = `W_${room.name}_${Game.time}`;
-      spawn.spawnCreep(body, name, {
-        memory: { role: "worker", room: room.name, working: false },
-      });
     }
+  }
+
+  private requestSpawn(
+    roomName: string,
+    role: string,
+    body: BodyPartConstant[],
+    priority: number,
+    memory: Record<string, unknown>,
+  ) {
+    const pid = `spawn_${roomName}_${role}_${Game.time}_${Math.floor(Math.random() * 1000)}`;
+    const job = new SpawnJob(pid, this.pid, priority);
+    this.kernel.addProcess(job);
+
+    const mem = this.kernel.getProcessMemory(pid);
+    mem.roomName = roomName;
+    mem.role = role;
+    mem.body = body;
+    mem.memory = memory;
+    mem.spawnName =
+      memory.name ??
+      `${role === "worker" ? "W" : role[0].toUpperCase()}_${roomName}_${Game.time}`;
   }
 }
 

@@ -3,6 +3,57 @@ export const config = {
   CPU: {
     BUCKET_LIMIT: 500,
     CRITICAL_BUCKET: 200,
+    THROTTLE_MIN_PRIORITY: 55,
+    CRITICAL_MIN_PRIORITY: 70,
+    THROTTLE_LOG_INTERVAL: 25,
+  },
+  SPAWN: {
+    JOB_TIMEOUT: 300,
+    JOB_SLEEP: 5,
+    REPLACE_BUFFER: 50,
+  },
+  POPULATION: {
+    METRICS_ALPHA: 0.05,
+    WORKER: {
+      MIN: 2,
+      RCL_TARGETS: [0, 6, 8, 8, 6, 6, 4, 4, 4],
+      IDLE_HIGH: 0.3,
+      IDLE_LOW: 0.05,
+      BUSY_SITES_MIN: 1,
+      DELTA_IDLE: -1,
+      DELTA_BUSY: 1,
+      STORAGE_LOW: 2000,
+      STORAGE_HIGH: 50000,
+      STORAGE_BOOST: 1,
+      STORAGE_REDUCE: -1,
+      LINK_REDUCE: -2,
+      DISTRIBUTOR_REDUCE: -1,
+    },
+    ENERGY_BUDGET: {
+      CRITICAL_MIN: 300,
+      LOW_RATIO: 0.4,
+      MID_RATIO: 0.5,
+    },
+    UPGRADER: {
+      STORAGE_HEALTHY: 5000,
+      AVAILABLE_HEALTHY_RATIO: 0.5,
+      STORAGE_RICH: 100000,
+      STORAGE_MEDIUM: 20000,
+      COUNT_RICH: 3,
+      COUNT_MEDIUM: 2,
+      COUNT_LOW: 1,
+      THROTTLE_RATIO: 0.5,
+    },
+    DISTRIBUTOR: {
+      STORAGE_MIN_FOR_SPAWN: 2000,
+      STORAGE_MIN_FOR_BIG: 10000,
+      STORAGE_BUDGET_DIVISOR: 5,
+      MIN_BUDGET: 500,
+    },
+    DEFENSE: {
+      RECENT_HOSTILE_TICKS: 50,
+    },
+    CPU_BUCKET_STOP_NON_CRITICAL: 500,
   },
   CONTROLLER: {
     DOWNGRADE_CRITICAL: 5000,
@@ -15,6 +66,9 @@ export const config = {
       KILLERS: 1,
       HEALERS: 1,
     },
+  },
+  STRATEGY: {
+    MODE_SWITCH_MIN_TICKS: 50,
   },
   LAYOUT: {
     DEFAULT: "stamp" as "stamp" | "bunker",

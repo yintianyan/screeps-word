@@ -1,7 +1,10 @@
 import { Process } from "../core/Process";
 import { processRegistry } from "../core/ProcessRegistry";
 import { runTowers } from "./Tower";
-import { smartMove } from "../tasks/move/smartMove";
+import StructureCache from "../utils/structureCache";
+import { AttackTask } from "../tasks/AttackTask";
+import { RangedAttackTask } from "../tasks/RangedAttackTask";
+import { MoveTask } from "../tasks/MoveTask";
 
 function getMyRooms(): Room[] {
   const rooms: Room[] = [];
@@ -12,65 +15,133 @@ function getMyRooms(): Room[] {
   return rooms;
 }
 
-function runDefenders(room: Room): void {
-  const hostiles = room.find(FIND_HOSTILE_CREEPS);
-  const keeper = hostiles.find((c) => c.owner?.username === "Source Keeper") ?? null;
-  const target = keeper ?? hostiles[0] ?? null;
-  const hasTower =
-    room.find(FIND_MY_STRUCTURES, {
-      filter: (s) => s.structureType === STRUCTURE_TOWER,
-    }).length > 0;
-
-  const defenders = Object.values(Game.creeps).filter(
-    (c) => c.memory.role === "defender" && c.memory.homeRoom === room.name,
-  );
-
-  for (const creep of defenders) {
-    if (keeper && !hasTower) {
-      const spawn = room.find(FIND_MY_SPAWNS)[0];
-      if (spawn) smartMove(creep, spawn, { reusePath: 20, range: 2 });
-      continue;
-    }
-    if (target) {
-      const r = creep.attack(target);
-      if (r === ERR_NOT_IN_RANGE) smartMove(creep, target, { reusePath: 10, range: 1 });
-      continue;
-    }
-
-    const spawn = room.find(FIND_MY_SPAWNS)[0];
-    if (spawn) smartMove(creep, spawn, { reusePath: 20, range: 2 });
-  }
-}
-
-function updateDefenseState(room: Room): void {
-  const hostiles = room.find(FIND_HOSTILE_CREEPS).length;
-  const towers = room.find(FIND_MY_STRUCTURES, {
-    filter: (s) => s.structureType === STRUCTURE_TOWER,
-  }) as StructureTower[];
+function updateDefenseState(room: Room, hostiles: Creep[], towers: StructureTower[]): void {
   const towerEnergy = towers.reduce(
     (sum, t) => sum + t.store.getUsedCapacity(RESOURCE_ENERGY),
     0,
   );
 
-  const defenders = Object.values(Game.creeps).filter(
-    (c) => c.memory.role === "defender" && c.memory.homeRoom === room.name,
+  const defenders = StructureCache.getCreeps(room, "defender").filter(
+    (c) => c.memory.homeRoom === room.name,
   ).length;
 
   const canFight =
     (towers.length > 0 && towerEnergy >= 300) ||
     (towers.length === 0 && defenders > 0);
 
-  if (hostiles > 0) room.memory.defenseLastHostile = Game.time;
-  room.memory.defense = { hostiles, lastSeen: Game.time, canFight };
+  if (hostiles.length > 0) room.memory.defenseLastHostile = Game.time;
+  room.memory.defense = { hostiles: hostiles.length, lastSeen: Game.time, canFight };
 }
 
 export class DefenseProcess extends Process {
   public run(): void {
     for (const room of getMyRooms()) {
-      updateDefenseState(room);
+      const hostiles = room.find(FIND_HOSTILE_CREEPS);
+      const towers = StructureCache.getMyStructures(
+        room,
+        STRUCTURE_TOWER,
+      ) as StructureTower[];
+
+      updateDefenseState(room, hostiles, towers);
       runTowers(room);
-      runDefenders(room);
+      this.runDefenders(room, hostiles, towers);
     }
+  }
+
+  private runDefenders(room: Room, hostiles: Creep[], towers: StructureTower[]): void {
+    const keeper = hostiles.find((c) => c.owner?.username === "Source Keeper") ?? null;
+    const target = keeper ?? hostiles[0] ?? null;
+    const hasTower = towers.length > 0;
+    
+    const defenders = StructureCache.getCreeps(room, "defender").filter(
+      (c) => c.memory.homeRoom === room.name,
+    );
+
+    for (const creep of defenders) {
+        if (creep.memory.taskId) {
+            const taskPid = creep.memory.taskId;
+            const taskMem = this.kernel.getProcessMemory(taskPid);
+            
+            if (keeper && !hasTower) {
+                if (taskMem.type !== "MoveTask") {
+                     this.kernel.killProcess(taskPid);
+                     delete creep.memory.taskId;
+                } else {
+                     continue;
+                }
+            } 
+            else if (target) {
+                if (taskMem.type !== "AttackTask" && taskMem.type !== "RangedAttackTask") {
+                     this.kernel.killProcess(taskPid);
+                     delete creep.memory.taskId;
+                } else {
+                     if (taskMem.targetId !== target.id) {
+                          this.kernel.killProcess(taskPid);
+                          delete creep.memory.taskId;
+                     } else {
+                          continue;
+                     }
+                }
+            } 
+            else {
+                if (taskMem.type !== "MoveTask") {
+                    this.kernel.killProcess(taskPid);
+                    delete creep.memory.taskId;
+                } else {
+                    continue;
+                }
+            }
+        }
+        
+        if (keeper && !hasTower) {
+            const spawn = (StructureCache.getMyStructures(
+              room,
+              STRUCTURE_SPAWN,
+            ) as StructureSpawn[])[0];
+            if (spawn) {
+                this.spawnTask(creep, "MoveTask", { targetPos: { x: spawn.pos.x, y: spawn.pos.y, roomName: room.name }, range: 2 }, 95);
+            }
+        } else if (target) {
+             if (creep.getActiveBodyparts(RANGED_ATTACK) > 0) {
+                 this.spawnTask(creep, "RangedAttackTask", { targetId: target.id }, 95);
+             } else {
+                 this.spawnTask(creep, "AttackTask", { targetId: target.id }, 95);
+             }
+        } else {
+            const spawn = (StructureCache.getMyStructures(
+              room,
+              STRUCTURE_SPAWN,
+            ) as StructureSpawn[])[0];
+            if (spawn && !creep.pos.inRangeTo(spawn, 5)) {
+                this.spawnTask(creep, "MoveTask", { targetPos: { x: spawn.pos.x, y: spawn.pos.y, roomName: room.name }, range: 5 }, 40);
+            }
+        }
+    }
+  }
+
+  private spawnTask(
+    creep: Creep,
+    type: "AttackTask" | "RangedAttackTask" | "MoveTask",
+    data: Record<string, unknown>,
+    priority: number,
+  ): void {
+      const pid = `task_${creep.name}_${Game.time}_${Math.floor(Math.random()*1000)}`;
+      let process: Process | undefined;
+      
+      switch (type) {
+          case "AttackTask": process = new AttackTask(pid, this.pid, priority); break;
+          case "RangedAttackTask": process = new RangedAttackTask(pid, this.pid, priority); break;
+          case "MoveTask": process = new MoveTask(pid, this.pid, priority); break;
+      }
+
+      if (process) {
+          this.kernel.addProcess(process);
+          const mem = this.kernel.getProcessMemory(pid);
+          mem.creepName = creep.name;
+          mem.type = type; 
+          Object.assign(mem, data);
+          creep.memory.taskId = pid;
+      }
   }
 }
 

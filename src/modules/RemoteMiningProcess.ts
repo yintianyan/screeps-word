@@ -1,12 +1,19 @@
 import { Process } from "../core/Process";
 import { processRegistry } from "../core/ProcessRegistry";
 import { config } from "../config";
-import { smartMove } from "../tasks/move/smartMove";
-import { runHarvest } from "../tasks/impl/harvest";
-import { runPickup } from "../tasks/impl/pickup";
-import { runTransfer } from "../tasks/impl/transfer";
-import { runWithdraw } from "../tasks/impl/withdraw";
 import { isSourceKeeperRoom } from "../utils/roomName";
+import { HarvestTask } from "../tasks/HarvestTask";
+import { TransferTask } from "../tasks/TransferTask";
+import { WithdrawTask } from "../tasks/WithdrawTask";
+import { PickupTask } from "../tasks/PickupTask";
+import { BuildTask } from "../tasks/BuildTask";
+import { RepairTask } from "../tasks/RepairTask";
+import { AttackTask } from "../tasks/AttackTask";
+import { RangedAttackTask } from "../tasks/RangedAttackTask";
+import { HealTask } from "../tasks/HealTask";
+import { ClaimTask } from "../tasks/ClaimTask";
+import { MoveTask } from "../tasks/MoveTask";
+import { smartMove } from "../tasks/move/smartMove";
 
 type HomeRemotePair = { home: Room; remoteName: string };
 type SourcePlan = {
@@ -292,256 +299,6 @@ function planRemoteStaticHarvesting(home: Room, remoteName: string): void {
   }
 }
 
-function moveToRoom(creep: Creep, roomName: string): void {
-  if (creep.room.name === roomName) return;
-  const dir = creep.room.findExitTo(roomName);
-  if (dir === ERR_NO_PATH || dir === ERR_INVALID_ARGS) return;
-  const exits = creep.room.find(dir as ExitConstant);
-  const exit = creep.pos.findClosestByRange(exits);
-  if (exit) smartMove(creep, exit, { reusePath: 20, range: 1 });
-}
-
-function pickHomeEnergyTargetId(room: Room): string | null {
-  const storage = room.storage;
-  if (storage && storage.store.getFreeCapacity(RESOURCE_ENERGY) > 0)
-    return storage.id;
-
-  const spawn = room.find(FIND_MY_SPAWNS, {
-    filter: (s) => s.store.getFreeCapacity(RESOURCE_ENERGY) > 0,
-  })[0];
-  if (spawn) return spawn.id;
-
-  const extension = room.find(FIND_MY_STRUCTURES, {
-    filter: (s) =>
-      s.structureType === STRUCTURE_EXTENSION &&
-      (s as StructureExtension).store.getFreeCapacity(RESOURCE_ENERGY) > 0,
-  })[0] as StructureExtension | undefined;
-
-  return extension ? extension.id : null;
-}
-
-function runRemoteHarvester(
-  creep: Creep,
-  home: Room,
-  remoteName: string,
-): void {
-  if (!isRemoteSafe(home, remoteName)) {
-    moveToRoom(creep, home.name);
-    return;
-  }
-
-  if (creep.room.name !== remoteName) {
-    moveToRoom(creep, remoteName);
-    return;
-  }
-
-  const sourceId = creep.memory.sourceId;
-  const source = sourceId ? Game.getObjectById(sourceId) : null;
-  const pickedSource = source ?? creep.room.find(FIND_SOURCES)[0] ?? null;
-  if (!pickedSource) return;
-  creep.memory.sourceId = pickedSource.id;
-
-  const entry = home.memory.remote?.[remoteName];
-  const plan = entry?.sources?.[pickedSource.id];
-  const cp = plan?.containerPos;
-  if (cp) {
-    const container = getContainerAt(creep.room, cp.x, cp.y);
-    if (container) {
-      if (creep.pos.x !== cp.x || creep.pos.y !== cp.y) {
-        smartMove(creep, container, { reusePath: 20, range: 0 });
-        return;
-      }
-      if (creep.store.getUsedCapacity(RESOURCE_ENERGY) >= 40) {
-        creep.transfer(container, RESOURCE_ENERGY);
-        return;
-      }
-      runHarvest(creep, pickedSource.id);
-      return;
-    }
-
-    const site = getContainerSiteAt(creep.room, cp.x, cp.y);
-    if (site) {
-      if (creep.pos.getRangeTo(site) > 0) {
-        smartMove(creep, site, { reusePath: 20, range: 0 });
-        return;
-      }
-      if (creep.store.getUsedCapacity(RESOURCE_ENERGY) >= 20) {
-        creep.build(site);
-        return;
-      }
-    }
-  }
-
-  runHarvest(creep, pickedSource.id);
-}
-
-function pickDroppedEnergyId(room: Room): string | null {
-  const drops = room.find(FIND_DROPPED_RESOURCES, {
-    filter: (r) => r.resourceType === RESOURCE_ENERGY && r.amount >= 50,
-  });
-  drops.sort((a, b) => b.amount - a.amount);
-  return drops[0]?.id ?? null;
-}
-
-function pickContainerWithEnergyId(room: Room): string | null {
-  const containers = room.find(FIND_STRUCTURES, {
-    filter: (s) =>
-      s.structureType === STRUCTURE_CONTAINER &&
-      (s as StructureContainer).store.getUsedCapacity(RESOURCE_ENERGY) > 0,
-  }) as StructureContainer[];
-  containers.sort(
-    (a, b) =>
-      b.store.getUsedCapacity(RESOURCE_ENERGY) -
-      a.store.getUsedCapacity(RESOURCE_ENERGY),
-  );
-  return containers[0]?.id ?? null;
-}
-
-function runRemoteHauler(creep: Creep, home: Room, remoteName: string): void {
-  if (!isRemoteSafe(home, remoteName)) {
-    creep.memory.hauling = true;
-  }
-
-  if (
-    creep.memory.hauling &&
-    creep.store.getUsedCapacity(RESOURCE_ENERGY) === 0
-  ) {
-    creep.memory.hauling = false;
-  }
-  if (
-    !creep.memory.hauling &&
-    creep.store.getFreeCapacity(RESOURCE_ENERGY) === 0
-  ) {
-    creep.memory.hauling = true;
-  }
-
-  if (creep.memory.hauling) {
-    if (creep.room.name !== home.name) {
-      moveToRoom(creep, home.name);
-      return;
-    }
-    const targetId = pickHomeEnergyTargetId(home);
-    if (!targetId) return;
-    runTransfer(creep, targetId);
-    return;
-  }
-
-  if (creep.room.name !== remoteName) {
-    moveToRoom(creep, remoteName);
-    return;
-  }
-
-  const containerId = pickContainerWithEnergyId(creep.room);
-  if (containerId) {
-    runWithdraw(creep, containerId);
-    return;
-  }
-
-  const dropId = pickDroppedEnergyId(creep.room);
-  if (dropId) {
-    runPickup(creep, dropId);
-    return;
-  }
-}
-
-function runReserver(creep: Creep, home: Room, remoteName: string): void {
-  if (!isRemoteSafe(home, remoteName)) {
-    moveToRoom(creep, home.name);
-    return;
-  }
-
-  if (creep.room.name !== remoteName) {
-    moveToRoom(creep, remoteName);
-    return;
-  }
-
-  const controller = creep.room.controller;
-  if (!controller) return;
-  const r = creep.reserveController(controller);
-  if (r === ERR_NOT_IN_RANGE) smartMove(creep, controller, { reusePath: 20, range: 1 });
-}
-
-function pickKeeperTarget(room: Room): Creep | null {
-  const hostiles = room.find(FIND_HOSTILE_CREEPS);
-  return (
-    hostiles.find((c) => c.owner?.username === "Source Keeper") ??
-    hostiles[0] ??
-    null
-  );
-}
-
-function runKeeperKiller(creep: Creep, home: Room, remoteName: string): void {
-  if (!canRunSkRemote(home)) {
-    moveToRoom(creep, home.name);
-    return;
-  }
-  if (creep.room.name !== remoteName) {
-    moveToRoom(creep, remoteName);
-    return;
-  }
-
-  if (creep.hits < creep.hitsMax) creep.heal(creep);
-
-  const target = pickKeeperTarget(creep.room);
-  if (!target) return;
-  const r = creep.rangedAttack(target);
-  if (r === ERR_NOT_IN_RANGE) smartMove(creep, target, { reusePath: 10, range: 3 });
-}
-
-function runKeeperHealer(creep: Creep, home: Room, remoteName: string): void {
-  if (!canRunSkRemote(home)) {
-    moveToRoom(creep, home.name);
-    return;
-  }
-  if (creep.room.name !== remoteName) {
-    moveToRoom(creep, remoteName);
-    return;
-  }
-
-  const killers = Object.values(Game.creeps).filter(
-    (c) =>
-      c.memory.role === "keeperKiller" &&
-      c.memory.homeRoom === home.name &&
-      c.memory.targetRoom === remoteName &&
-      c.room.name === remoteName,
-  );
-  const follow = killers[0] ?? null;
-
-  if (follow) {
-    if (follow.hits < follow.hitsMax) {
-      const r = creep.heal(follow);
-      if (r === ERR_NOT_IN_RANGE)
-        smartMove(creep, follow, { reusePath: 10, range: 1 });
-      return;
-    }
-    if (creep.pos.getRangeTo(follow) > 1)
-      smartMove(creep, follow, { reusePath: 10, range: 1 });
-    if (creep.hits < creep.hitsMax) creep.heal(creep);
-    return;
-  }
-
-  if (creep.hits < creep.hitsMax) creep.heal(creep);
-}
-
-function runScout(creep: Creep, home: Room, remoteName: string): void {
-  if (creep.room.name !== remoteName) {
-    moveToRoom(creep, remoteName);
-    return;
-  }
-
-  if (!home.memory.remotes) home.memory.remotes = [];
-  if (!home.memory.remotes.includes(remoteName)) {
-    if (evaluateRemote(home, creep.room)) home.memory.remotes.push(remoteName);
-  }
-
-  const scout = home.memory.scout;
-  if (scout && scout.targetRoom === remoteName) {
-    scout.status = "completed";
-    delete scout.targetRoom;
-    scout.lastScan = Game.time;
-  }
-}
-
 function updateRemoteStats(home: Room, remoteName: string): void {
   const entry = ensureRemoteEntry(home, remoteName);
   if (entry.stats && Game.time - entry.stats.lastCalc < 1000) return;
@@ -587,6 +344,57 @@ function updateRemoteStats(home: Room, remoteName: string): void {
   };
 }
 
+// Helpers for task assignment
+function pickHomeEnergyTargetId(room: Room): string | null {
+  const storage = room.storage;
+  if (storage && storage.store.getFreeCapacity(RESOURCE_ENERGY) > 0)
+    return storage.id;
+
+  const spawn = room.find(FIND_MY_SPAWNS, {
+    filter: (s) => s.store.getFreeCapacity(RESOURCE_ENERGY) > 0,
+  })[0];
+  if (spawn) return spawn.id;
+
+  const extension = room.find(FIND_MY_STRUCTURES, {
+    filter: (s) =>
+      s.structureType === STRUCTURE_EXTENSION &&
+      (s as StructureExtension).store.getFreeCapacity(RESOURCE_ENERGY) > 0,
+  })[0] as StructureExtension | undefined;
+
+  return extension ? extension.id : null;
+}
+
+function pickDroppedEnergyId(room: Room): string | null {
+  const drops = room.find(FIND_DROPPED_RESOURCES, {
+    filter: (r) => r.resourceType === RESOURCE_ENERGY && r.amount >= 50,
+  });
+  drops.sort((a, b) => b.amount - a.amount);
+  return drops[0]?.id ?? null;
+}
+
+function pickContainerWithEnergyId(room: Room): string | null {
+  const containers = room.find(FIND_STRUCTURES, {
+    filter: (s) =>
+      s.structureType === STRUCTURE_CONTAINER &&
+      (s as StructureContainer).store.getUsedCapacity(RESOURCE_ENERGY) > 0,
+  }) as StructureContainer[];
+  containers.sort(
+    (a, b) =>
+      b.store.getUsedCapacity(RESOURCE_ENERGY) -
+      a.store.getUsedCapacity(RESOURCE_ENERGY),
+  );
+  return containers[0]?.id ?? null;
+}
+
+function pickKeeperTarget(room: Room): Creep | null {
+  const hostiles = room.find(FIND_HOSTILE_CREEPS);
+  return (
+    hostiles.find((c) => c.owner?.username === "Source Keeper") ??
+    hostiles[0] ??
+    null
+  );
+}
+
 export class RemoteMiningProcess extends Process {
   public run(): void {
     for (const home of getMyRooms()) runRemoteDiscovery(home);
@@ -599,6 +407,15 @@ export class RemoteMiningProcess extends Process {
 
     const creeps = Object.values(Game.creeps);
     for (const creep of creeps) {
+      if (creep.memory.taskId) {
+          const taskPid = creep.memory.taskId;
+          if (!this.kernel.getProcessType(taskPid)) {
+              delete creep.memory.taskId;
+          } else {
+              continue;
+          }
+      }
+
       const role = creep.memory.role;
       const homeRoom = creep.memory.homeRoom;
       const targetRoom = creep.memory.targetRoom;
@@ -607,14 +424,196 @@ export class RemoteMiningProcess extends Process {
       const home = Game.rooms[homeRoom];
       if (!home?.controller?.my) continue;
 
-      if (role === "remoteHarvester")
-        runRemoteHarvester(creep, home, targetRoom);
-      if (role === "remoteHauler") runRemoteHauler(creep, home, targetRoom);
-      if (role === "reserver") runReserver(creep, home, targetRoom);
-      if (role === "keeperKiller") runKeeperKiller(creep, home, targetRoom);
-      if (role === "keeperHealer") runKeeperHealer(creep, home, targetRoom);
-      if (role === "scout") runScout(creep, home, targetRoom);
+      const task = this.assignRemoteTask(creep, role, home, targetRoom);
+      if (task) {
+          this.spawnTask(creep, task.type, task.data, task.priority);
+      }
     }
+  }
+
+  private assignRemoteTask(creep: Creep, role: string, home: Room, targetRoom: string): { type: string, data: any, priority: number } | null {
+      // Common: Check if safe
+      // STRICT CHECK: If we are not in target room, and it's unsafe, DO NOT ENTER.
+      if (!isRemoteSafe(home, targetRoom)) {
+          // Unsafe: Move home if not already there
+          if (creep.room.name !== home.name) {
+              return { type: "MoveTask", data: { targetRoom: home.name }, priority: 60 };
+          }
+          // If at home, wait.
+          return null; 
+      }
+
+      // Role specific
+      if (role === "scout") {
+          if (creep.room.name !== targetRoom) {
+              return { type: "MoveTask", data: { targetRoom }, priority: 55 };
+          }
+          return null;
+      }
+
+      if (role === "remoteHarvester") {
+          if (creep.room.name !== targetRoom) {
+              return { type: "MoveTask", data: { targetRoom }, priority: 50 };
+          }
+          
+          const sourceId = creep.memory.sourceId;
+          const source = sourceId ? Game.getObjectById(sourceId as Id<Source>) : null;
+          const pickedSource = source ?? creep.room.find(FIND_SOURCES)[0] ?? null;
+          if (!pickedSource) return null;
+          creep.memory.sourceId = pickedSource.id;
+
+          const entry = home.memory.remote?.[targetRoom];
+          const plan = entry?.sources?.[pickedSource.id];
+          const cp = plan?.containerPos;
+          
+          if (cp) {
+             const container = getContainerAt(creep.room, cp.x, cp.y);
+             if (container) {
+                 if (container.hits < container.hitsMax && creep.store.getUsedCapacity(RESOURCE_ENERGY) > 0) {
+                     return { type: "RepairTask", data: { targetId: container.id }, priority: 55 };
+                 }
+                 // If container exists, just harvest. But we need to be ON the container.
+                 // HarvestTask usually moves to range 1.
+                 // We need to move to container pos.
+                 if (creep.pos.x !== cp.x || creep.pos.y !== cp.y) {
+                     return { type: "MoveTask", data: { targetPos: { x: cp.x, y: cp.y, roomName: targetRoom }, range: 0 }, priority: 55 };
+                 }
+                 return { type: "HarvestTask", data: { targetId: pickedSource.id }, priority: 50 };
+             }
+
+             const site = getContainerSiteAt(creep.room, cp.x, cp.y);
+             if (site) {
+                 if (creep.store.getUsedCapacity(RESOURCE_ENERGY) >= 20) {
+                     return { type: "BuildTask", data: { targetId: site.id }, priority: 60 };
+                 }
+                 return { type: "HarvestTask", data: { targetId: pickedSource.id }, priority: 50 };
+             }
+          }
+          return { type: "HarvestTask", data: { targetId: pickedSource.id }, priority: 50 };
+      }
+
+      if (role === "remoteHauler") {
+          if (creep.memory.hauling && creep.store.getUsedCapacity(RESOURCE_ENERGY) === 0)
+             creep.memory.hauling = false;
+          if (!creep.memory.hauling && creep.store.getFreeCapacity(RESOURCE_ENERGY) === 0)
+             creep.memory.hauling = true;
+             
+          if (creep.memory.hauling) {
+              if (creep.room.name !== home.name) {
+                  return { type: "MoveTask", data: { targetRoom: home.name }, priority: 50 };
+              }
+              const targetId = pickHomeEnergyTargetId(home);
+              if (targetId) return { type: "TransferTask", data: { targetId }, priority: 60 };
+              return null;
+          } else {
+              if (creep.room.name !== targetRoom) {
+                  return { type: "MoveTask", data: { targetRoom }, priority: 50 };
+              }
+              const containerId = pickContainerWithEnergyId(creep.room);
+              if (containerId) return { type: "WithdrawTask", data: { targetId: containerId }, priority: 55 };
+              const dropId = pickDroppedEnergyId(creep.room);
+              if (dropId) return { type: "PickupTask", data: { targetId: dropId }, priority: 55 };
+              return null;
+          }
+      }
+
+      if (role === "reserver") {
+          if (creep.room.name !== targetRoom) {
+              return { type: "MoveTask", data: { targetRoom }, priority: 50 };
+          }
+          if (creep.room.controller) {
+              return { type: "ClaimTask", data: { targetId: creep.room.controller.id }, priority: 50 };
+          }
+      }
+
+      if (role === "keeperKiller") {
+          if (creep.room.name !== targetRoom) {
+               return { type: "MoveTask", data: { targetRoom }, priority: 80 }; // High priority move
+          }
+          const target = pickKeeperTarget(creep.room);
+          if (target) {
+              return { type: "RangedAttackTask", data: { targetId: target.id }, priority: 85 };
+          }
+          // Heal self if no target
+          if (creep.hits < creep.hitsMax) {
+              return { type: "HealTask", data: { targetId: creep.id }, priority: 90 };
+          }
+      }
+
+      if (role === "keeperHealer") {
+          if (creep.room.name !== targetRoom) {
+               return { type: "MoveTask", data: { targetRoom }, priority: 80 };
+          }
+          // Find killer to heal
+          const killers = Object.values(Game.creeps).filter(c => c.memory.role === "keeperKiller" && c.room.name === targetRoom);
+          const follow = killers[0];
+          if (follow) {
+              if (follow.hits < follow.hitsMax) {
+                  return { type: "HealTask", data: { targetId: follow.id }, priority: 90 };
+              }
+              // Move to follow
+              if (creep.pos.getRangeTo(follow) > 1) {
+                  return { type: "MoveTask", data: { targetPos: { x: follow.pos.x, y: follow.pos.y, roomName: targetRoom }, range: 1 }, priority: 80 };
+              }
+          }
+          if (creep.hits < creep.hitsMax) {
+               return { type: "HealTask", data: { targetId: creep.id }, priority: 90 };
+          }
+      }
+
+      if (role === "scout") {
+          if (creep.room.name !== targetRoom) {
+               return { type: "MoveTask", data: { targetRoom }, priority: 40 };
+          }
+          // Arrived logic handled in main loop (runScout logic inside process?)
+          // Wait, runScout logic was "if in room, update memory".
+          // The scout task (MoveTask) completes when in room.
+          // Then creep has no task.
+          // We can check if creep is in targetRoom here and do the memory update.
+          if (creep.room.name === targetRoom) {
+               if (!home.memory.remotes) home.memory.remotes = [];
+               if (!home.memory.remotes.includes(targetRoom)) {
+                   if (evaluateRemote(home, creep.room)) home.memory.remotes.push(targetRoom);
+               }
+               const scout = home.memory.scout;
+               if (scout && scout.targetRoom === targetRoom) {
+                   scout.status = "completed";
+                   delete scout.targetRoom;
+                   scout.lastScan = Game.time;
+               }
+               // Scout done. Kill creep? Or let Spawner handle cleanup (Spawner doesn't kill).
+               creep.suicide(); // Optimization: recycle if possible, but suicide is fast.
+          }
+      }
+
+      return null;
+  }
+
+  private spawnTask(creep: Creep, type: string, data: any, priority: number): void {
+      const pid = `task_${creep.name}_${Game.time}_${Math.floor(Math.random()*1000)}`;
+      let process: Process | undefined;
+      
+      switch (type) {
+          case "HarvestTask": process = new HarvestTask(pid, this.pid, priority); break;
+          case "TransferTask": process = new TransferTask(pid, this.pid, priority); break;
+          case "WithdrawTask": process = new WithdrawTask(pid, this.pid, priority); break;
+          case "PickupTask": process = new PickupTask(pid, this.pid, priority); break;
+          case "BuildTask": process = new BuildTask(pid, this.pid, priority); break;
+          case "RepairTask": process = new RepairTask(pid, this.pid, priority); break;
+          case "AttackTask": process = new AttackTask(pid, this.pid, priority); break;
+          case "RangedAttackTask": process = new RangedAttackTask(pid, this.pid, priority); break;
+          case "HealTask": process = new HealTask(pid, this.pid, priority); break;
+          case "ClaimTask": process = new ClaimTask(pid, this.pid, priority); break;
+          case "MoveTask": process = new MoveTask(pid, this.pid, priority); break;
+      }
+
+      if (process) {
+          this.kernel.addProcess(process);
+          const mem = this.kernel.getProcessMemory(pid);
+          mem.creepName = creep.name;
+          Object.assign(mem, data);
+          creep.memory.taskId = pid;
+      }
   }
 }
 
