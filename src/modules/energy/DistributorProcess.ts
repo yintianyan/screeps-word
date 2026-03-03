@@ -1,5 +1,6 @@
 import { Process } from "../../core/Process";
 import { processRegistry } from "../../core/ProcessRegistry";
+import { config } from "../../config";
 import { tryReserve } from "../../core/Reservation";
 import { Cache } from "../../core/Cache";
 import { Debug } from "../../core/Debug";
@@ -322,7 +323,8 @@ export class DistributorProcess extends Process {
       if (
         hasDemand &&
         storage &&
-        storage.store.getUsedCapacity(RESOURCE_ENERGY) > 0
+        storage.store.getUsedCapacity(RESOURCE_ENERGY) >
+          config.POPULATION.STORAGE.DISTRIBUTOR_WITHDRAW_MIN
       ) {
         creep.memory.sourceType = "storage";
         return {

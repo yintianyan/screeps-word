@@ -19,7 +19,7 @@ export class Dashboard {
 
     // Header
     console.log(
-      `| Room | RCL | Energy | Storage | Creeps (W/M/H/U/D) | Src (idle/total) | Mode | Hostiles |`,
+      `| Room | RCL | Energy | Storage | Creeps (W/M/H/di/U/D) | Src (idle/total) | Mode | Hostiles |`,
     );
 
     const roomsStats = Memory.stats.rooms;
@@ -28,7 +28,7 @@ export class Dashboard {
       // Otherwise fall back or skip
       const roomHistory = roomsStats[roomName].history;
       if (!roomHistory || roomHistory.length === 0) continue;
-      
+
       const stats = roomHistory[roomHistory.length - 1];
       if (Game.time - stats.time > 20) continue; // Skip stale stats
 
@@ -37,29 +37,32 @@ export class Dashboard {
         stats.rclProgress > 0 // Note: We don't have total progress in stats, assuming approximate or just showing raw
           ? ((stats.rclProgress / 1000000) * 100).toFixed(1) // Simplified, actual total depends on level
           : "100"; // Stats doesn't store progressTotal. Let's fix Stats.ts later to include it or just show raw.
-      
+
       // Let's stick to using stats for what we have.
-      // To calculate percentage correctly we need progressTotal. 
+      // To calculate percentage correctly we need progressTotal.
       // Let's grab room object if visible to get progressTotal, otherwise use stored data.
       const room = Game.rooms[roomName];
       let rclDisplay = `${rcl}`;
       if (room && room.controller) {
-         const progressTotal = room.controller.progressTotal;
-         const pct = progressTotal > 0 ? ((room.controller.progress / progressTotal) * 100).toFixed(1) : "100";
-         rclDisplay = `${rcl} (${pct}%)`;
+        const progressTotal = room.controller.progressTotal;
+        const pct =
+          progressTotal > 0
+            ? ((room.controller.progress / progressTotal) * 100).toFixed(1)
+            : "100";
+        rclDisplay = `${rcl} (${pct}%)`;
       }
 
       const energy = stats.energy;
       const capacity = stats.energyCapacity;
-      const energyPct = capacity > 0 ? ((energy / capacity) * 100).toFixed(0) : "0";
+      const energyPct =
+        capacity > 0 ? ((energy / capacity) * 100).toFixed(0) : "0";
 
-      const storage = stats.storage > 0
-        ? (stats.storage / 1000).toFixed(1) + "k"
-        : "-";
+      const storage =
+        stats.storage > 0 ? (stats.storage / 1000).toFixed(1) + "k" : "-";
 
       const c = stats.creepCounts;
-      const creepStr = `${c.worker || 0}/${c.miner || 0}/${c.hauler || 0}/${c.upgrader || 0}/${c.defender || 0}`;
-      
+      const creepStr = `${c.worker || 0}/${c.miner || 0}/${c.hauler || 0}/${c.distributor || 0}/${c.upgrader || 0}/${c.defender || 0}`;
+
       const srcStr = `${stats.idleSourceCount ?? 0}/${stats.sourceCount}`;
       const mode = stats.mode ?? "-";
       const hostiles = stats.enemyCount;

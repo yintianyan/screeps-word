@@ -4,6 +4,10 @@ import { plannedStructuresForRcl } from "./Layouts";
 import { findCoreAnchor } from "./DistanceTransform";
 
 type Anchor = { x: number; y: number };
+type DynamicPlan = {
+  roads: Set<string>;
+  noBuild: Set<string>;
+};
 
 function isInsideRoom(x: number, y: number): boolean {
   return x >= 2 && x <= 47 && y >= 2 && y <= 47;
@@ -24,13 +28,100 @@ function getAnchor(room: Room): Anchor | null {
   return spawn ? { x: spawn.pos.x, y: spawn.pos.y } : null;
 }
 
+function keyOf(x: number, y: number): string {
+  return `${x}:${y}`;
+}
+
+function parseKey(key: string): { x: number; y: number } | null {
+  const parts = key.split(":");
+  if (parts.length !== 2) return null;
+  const x = Number(parts[0]);
+  const y = Number(parts[1]);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  return { x, y };
+}
+
+function buildBaseMatrix(room: Room): CostMatrix {
+  const matrix = new PathFinder.CostMatrix();
+  const terrain = room.getTerrain();
+  for (let x = 0; x < 50; x++) {
+    for (let y = 0; y < 50; y++) {
+      if (terrain.get(x, y) === TERRAIN_MASK_WALL) {
+        matrix.set(x, y, 255);
+      }
+    }
+  }
+  const structures = room.find(FIND_STRUCTURES);
+  for (const s of structures) {
+    if (
+      s.structureType === STRUCTURE_ROAD ||
+      s.structureType === STRUCTURE_RAMPART ||
+      s.structureType === STRUCTURE_CONTAINER
+    ) {
+      if (s.structureType === STRUCTURE_ROAD) matrix.set(s.pos.x, s.pos.y, 1);
+      continue;
+    }
+    matrix.set(s.pos.x, s.pos.y, 255);
+  }
+  return matrix;
+}
+
+function computeDynamicPlan(room: Room, anchor: Anchor): DynamicPlan {
+  const planner = room.memory.planner;
+  const cached = planner?.dynamic;
+  if (
+    cached &&
+    cached.anchor.x === anchor.x &&
+    cached.anchor.y === anchor.y &&
+    Game.time - cached.lastUpdate < config.LAYOUT.DYNAMIC_INTERVAL
+  ) {
+    return {
+      roads: new Set(cached.roads),
+      noBuild: new Set(cached.noBuild),
+    };
+  }
+
+  const roads = new Set<string>();
+  const hub = new RoomPosition(anchor.x, anchor.y, room.name);
+  const targets: RoomPosition[] = [];
+  if (room.controller) targets.push(room.controller.pos);
+  const sources = room.find(FIND_SOURCES);
+  for (const s of sources) targets.push(s.pos);
+
+  const matrix = buildBaseMatrix(room);
+  for (const target of targets) {
+    const res = PathFinder.search(hub, { pos: target, range: 1 }, {
+      plainCost: 2,
+      swampCost: 8,
+      maxOps: 3000,
+      roomCallback: () => matrix,
+    });
+    for (const pos of res.path) {
+      if (!isInsideRoom(pos.x, pos.y)) continue;
+      roads.add(keyOf(pos.x, pos.y));
+    }
+  }
+
+  const noBuild = new Set<string>(roads);
+  room.memory.planner = room.memory.planner ?? { layout: getLayoutName(room) };
+  room.memory.planner.dynamic = {
+    lastUpdate: Game.time,
+    anchor: { x: anchor.x, y: anchor.y },
+    roads: [...roads],
+    noBuild: [...noBuild],
+  };
+  return { roads, noBuild };
+}
+
 function canPlace(
   room: Room,
   x: number,
   y: number,
   type: BuildableStructureConstant,
+  noBuild: Set<string>,
 ): boolean {
   if (!isInsideRoom(x, y)) return false;
+  if (type !== STRUCTURE_ROAD && noBuild.has(keyOf(x, y))) return false;
   const terrain = room.getTerrain();
   if (terrain.get(x, y) === TERRAIN_MASK_WALL) return false;
 
@@ -120,6 +211,30 @@ function placeOne(
   return result === OK;
 }
 
+function placeDynamicRoads(
+  room: Room,
+  anchor: Anchor,
+  roads: Set<string>,
+  budget: number,
+): number {
+  if (budget <= 0 || roads.size === 0) return 0;
+  const ordered = [...roads]
+    .map((k) => parseKey(k))
+    .filter((p): p is { x: number; y: number } => p != null)
+    .sort(
+      (a, b) =>
+        Math.abs(a.x - anchor.x) +
+          Math.abs(a.y - anchor.y) -
+        (Math.abs(b.x - anchor.x) + Math.abs(b.y - anchor.y)),
+    );
+  let placed = 0;
+  for (const p of ordered) {
+    if (placed >= budget) break;
+    if (placeOne(room, STRUCTURE_ROAD, p.x, p.y)) placed++;
+  }
+  return placed;
+}
+
 function planRoad(
   room: Room,
   from: RoomPosition,
@@ -171,6 +286,7 @@ export class Build {
 
     const rcl = room.controller.level;
     const layoutName = getLayoutName(room);
+    const dynamicPlan = computeDynamicPlan(room, anchor);
 
     const allSites = room.find(FIND_MY_CONSTRUCTION_SITES);
     const roadSites = allSites.filter(
@@ -217,7 +333,7 @@ export class Build {
       const x = anchor.x + p.dx;
       const y = anchor.y + p.dy;
 
-      if (canPlace(room, x, y, p.type)) {
+      if (canPlace(room, x, y, p.type, dynamicPlan.noBuild)) {
         if (placeOne(room, p.type, x, y)) placed++;
       }
     }
@@ -227,6 +343,13 @@ export class Build {
       const hub = new RoomPosition(anchor.x, anchor.y, room.name);
       const roadBudget = maxPerTick - placed;
       let roadPlaced = 0;
+
+      roadPlaced += placeDynamicRoads(
+        room,
+        anchor,
+        dynamicPlan.roads,
+        roadBudget - roadPlaced,
+      );
 
       if (room.controller && roadPlaced < roadBudget) {
         roadPlaced += planRoad(

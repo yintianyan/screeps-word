@@ -364,7 +364,11 @@ function pickEnergySourceId(creep: Creep): string | null {
   if (ruinId) return ruinId;
 
   const storage = creep.room.storage;
-  if (storage && storage.store.getUsedCapacity(RESOURCE_ENERGY) > 0) {
+  if (
+    storage &&
+    storage.store.getUsedCapacity(RESOURCE_ENERGY) >
+      config.POPULATION.STORAGE.WORKER_WITHDRAW_MIN
+  ) {
     if (tryReserve(storage.id, creep.name, 15)) return storage.id;
   }
 
@@ -414,7 +418,11 @@ function pickUpgraderEnergySourceId(creep: Creep): string | null {
   if (ruinId) return ruinId;
 
   const storage = creep.room.storage;
-  if (storage && storage.store.getUsedCapacity(RESOURCE_ENERGY) > 0) {
+  if (
+    storage &&
+    storage.store.getUsedCapacity(RESOURCE_ENERGY) >
+      config.POPULATION.STORAGE.UPGRADER_WITHDRAW_MIN
+  ) {
     if (tryReserve(storage.id, creep.name, 15)) return storage.id;
   }
 
@@ -484,7 +492,7 @@ function assignUpgraderTask(
     const storageEnergy =
       creep.room.storage?.store.getUsedCapacity(RESOURCE_ENERGY) ?? 0;
     const energyHealthy =
-      storageEnergy > 2000 ||
+      storageEnergy > config.POPULATION.STORAGE.UPGRADER_RUN_MIN ||
       creep.room.energyAvailable > creep.room.energyCapacityAvailable * 0.3;
     const ticksToDowngrade = creep.room.controller?.ticksToDowngrade ?? 10000;
 

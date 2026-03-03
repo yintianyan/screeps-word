@@ -58,6 +58,12 @@ export const config = {
       STORAGE_BUDGET_DIVISOR: 5, // 预算除数
       MIN_BUDGET: 500, // 最小预算
     },
+    STORAGE: {
+      WORKER_WITHDRAW_MIN: 3000,
+      UPGRADER_WITHDRAW_MIN: 8000,
+      UPGRADER_RUN_MIN: 6000,
+      DISTRIBUTOR_WITHDRAW_MIN: 1500,
+    },
     HAULER: {
       REBIND_INTERVAL: 25,
       PRESSURE_PER_HAULER: 200,
@@ -87,6 +93,7 @@ export const config = {
   },
   LAYOUT: {
     DEFAULT: "stamp" as "stamp" | "bunker", // 默认布局
+    DYNAMIC_INTERVAL: 50,
   },
   BODIES: {
     HARVESTER: {

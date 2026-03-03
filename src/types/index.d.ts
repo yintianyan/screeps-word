@@ -134,6 +134,12 @@ declare global {
     planner?: {
       layout: "stamp" | "bunker";
       anchor?: { x: number; y: number };
+      dynamic?: {
+        lastUpdate: number;
+        anchor: { x: number; y: number };
+        roads: string[];
+        noBuild: string[];
+      };
     };
     buildFocus?: {
       siteId: string;
