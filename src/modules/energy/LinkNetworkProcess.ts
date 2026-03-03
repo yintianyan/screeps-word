@@ -148,10 +148,32 @@ function getLinkObjects(room: Room): {
   controller: StructureLink | null;
 } {
   const mem = room.memory.links;
-  if (!mem || !mem.lastScan || Game.time - mem.lastScan > 100) {
-    const links = room.find(FIND_MY_STRUCTURES, {
-      filter: (s) => s.structureType === STRUCTURE_LINK,
-    }) as StructureLink[];
+  const links = room.find(FIND_MY_STRUCTURES, {
+    filter: (s) => s.structureType === STRUCTURE_LINK,
+  }) as StructureLink[];
+
+  const sourceBefore = (mem?.source ?? [])
+    .map((id) => Game.getObjectById(id as Id<StructureLink>))
+    .filter((l): l is StructureLink => l instanceof StructureLink);
+  const hubBefore = mem?.hub
+    ? (Game.getObjectById(mem.hub as Id<StructureLink>) as StructureLink | null)
+    : null;
+  const controllerBefore = mem?.controller
+    ? (Game.getObjectById(mem.controller as Id<StructureLink>) as StructureLink | null)
+    : null;
+
+  const mappedCount =
+    (mem?.source?.length ?? 0) + (mem?.hub ? 1 : 0) + (mem?.controller ? 1 : 0);
+  const resolvedCount =
+    sourceBefore.length + (hubBefore ? 1 : 0) + (controllerBefore ? 1 : 0);
+  const shouldRescan =
+    !mem ||
+    !mem.lastScan ||
+    Game.time - mem.lastScan > 100 ||
+    mappedCount !== links.length ||
+    resolvedCount !== mappedCount;
+
+  if (shouldRescan) {
     const ids = categorizeLinks(room, links);
     room.memory.links = room.memory.links ?? {};
     room.memory.links.source = ids.source;

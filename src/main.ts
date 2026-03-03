@@ -102,8 +102,12 @@ export const loop = ErrorMapper.wrapLoop(() => {
       kernel.addProcess(new DistributorProcess("distributor", "init", 65));
     }
 
-    if (!Memory.kernel.processTable["links"]) {
-      kernel.addProcess(new LinkNetworkProcess("links", "init", 55));
+    const linksProc = Memory.kernel.processTable["links"];
+    if (!linksProc) {
+      kernel.addProcess(new LinkNetworkProcess("links", "init", 86));
+    } else if (linksProc.priority !== 86) {
+      kernel.killProcess("links");
+      kernel.addProcess(new LinkNetworkProcess("links", "init", 86));
     }
 
     if (!lowBucket) {

@@ -299,6 +299,58 @@ export class MiningProcess extends Process {
         const sid = m.memory.sourceId;
         if (sid) minerAssigned[sid] = (minerAssigned[sid] ?? 0) + 1;
       }
+      const sourceIds = sources.map((s) => String(s.id));
+      const sourceIdSet = new Set(sourceIds);
+      for (const creep of miners) {
+        const sid = creep.memory.sourceId;
+        if (sid && !sourceIdSet.has(sid)) {
+          delete creep.memory.sourceId;
+          if (creep.memory.taskId) {
+            this.kernel.killProcess(creep.memory.taskId);
+            delete creep.memory.taskId;
+            delete creep.memory.targetId;
+          }
+        }
+      }
+      const minersBySource: Record<string, Creep[]> = {};
+      for (const id of sourceIds) minersBySource[id] = [];
+      for (const creep of miners) {
+        const sid = creep.memory.sourceId;
+        if (!sid || !sourceIdSet.has(sid)) continue;
+        minersBySource[sid].push(creep);
+      }
+      const lackingSources = sourceIds.filter((id) => (minerAssigned[id] ?? 0) === 0);
+      for (const targetSourceId of lackingSources) {
+        let donorSourceId: string | null = null;
+        for (const sourceId of sourceIds) {
+          if ((minerAssigned[sourceId] ?? 0) > 1) {
+            donorSourceId = sourceId;
+            break;
+          }
+        }
+        if (!donorSourceId) break;
+        const candidates = minersBySource[donorSourceId] ?? [];
+        if (candidates.length <= 1) continue;
+        let donor = candidates[0];
+        for (const c of candidates) {
+          if ((c.ticksToLive ?? 0) > (donor.ticksToLive ?? 0)) donor = c;
+        }
+        donor.memory.sourceId = targetSourceId;
+        if (donor.memory.taskId) {
+          this.kernel.killProcess(donor.memory.taskId);
+          delete donor.memory.taskId;
+          delete donor.memory.targetId;
+        }
+        minerAssigned[donorSourceId] = Math.max(
+          0,
+          (minerAssigned[donorSourceId] ?? 0) - 1,
+        );
+        minerAssigned[targetSourceId] = (minerAssigned[targetSourceId] ?? 0) + 1;
+        minersBySource[donorSourceId] = (minersBySource[donorSourceId] ?? []).filter(
+          (c) => c.name !== donor.name,
+        );
+        (minersBySource[targetSourceId] ??= []).push(donor);
+      }
       for (const creep of miners) {
         if (creep.memory.taskId) {
           const taskPid = creep.memory.taskId;

@@ -447,6 +447,8 @@ export class SpawnerProcess extends Process {
           const minerBodySize = body.length;
           const dyingMiners = getDyingCount("miner", minerBodySize);
           const minerJobs = roomJobs.filter((j) => j.role === "miner").length;
+          const replaceLead =
+            body.length * 3 + Math.min(config.SPAWN.REPLACE_BUFFER, 15);
 
           if (actualMinerCount - dyingMiners < sources.length) {
             if (roomJobs.length > 0) {
@@ -465,11 +467,7 @@ export class SpawnerProcess extends Process {
                     c.memory.sourceId !== sourceId
                   )
                     return false;
-                  if (
-                    (c.ticksToLive ?? 1500) <
-                    body.length * 3 + config.SPAWN.REPLACE_BUFFER
-                  )
-                    return false;
+                  if ((c.ticksToLive ?? 1500) < replaceLead) return false;
                   return true;
                 });
                 if (hasCreep) return true;
@@ -528,15 +526,13 @@ export class SpawnerProcess extends Process {
 
           if (minerJobs === 0) {
             const body = buildMinerBody(getSpawnEnergyBudget(room, true));
+            const replaceLead =
+              body.length * 3 + Math.min(config.SPAWN.REPLACE_BUFFER, 15);
             const isAssigned = (sourceId: string) => {
               const hasCreep = creeps.some((c) => {
                 if (c.memory.role !== "miner" || c.memory.sourceId !== sourceId)
                   return false;
-                if (
-                  (c.ticksToLive ?? 1500) <
-                  body.length * 3 + config.SPAWN.REPLACE_BUFFER
-                )
-                  return false;
+                if ((c.ticksToLive ?? 1500) < replaceLead) return false;
                 return true;
               });
               if (hasCreep) return true;

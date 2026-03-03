@@ -61,12 +61,10 @@ export abstract class Process implements IProcess {
         kMem.status = ProcessStatus.Sleeping;
         kMem.sleepInfo = { start: Game.time, duration: ticks };
       } else {
-        console.log(
-          `[Process] Sleep failed: PID ${this.pid} not found in Memory.kernel.processTable`,
-        );
+        this.status = ProcessStatus.Running;
       }
     } else {
-      console.log(`[Process] Sleep failed: this.kernel is undefined for PID ${this.pid}`);
+      this.status = ProcessStatus.Running;
     }
   }
 

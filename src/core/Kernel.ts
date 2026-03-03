@@ -26,6 +26,16 @@ export class Kernel {
   private sortedLen = 0;
   private sortedPids: string[] = [];
 
+  private syncMemory(): void {
+    if (!Memory.kernel) {
+      Memory.kernel = {
+        processTable: {},
+        processIndex: [],
+      };
+    }
+    this.memory = Memory.kernel;
+  }
+
   /**
    * 获取按优先级排序的 PID 列表
    * 
@@ -33,6 +43,7 @@ export class Kernel {
    * 每 5 tick 强制重排序一次，确保优先级变更能及时生效。
    */
   private getScheduledPids(): string[] {
+    this.syncMemory();
     const len = this.memory.processIndex.length;
     if (
       this.sortedTick !== Game.time &&
@@ -59,6 +70,7 @@ export class Kernel {
    * @param pids 要终止的进程 ID 列表
    */
   private killMany(pids: string[]): void {
+    this.syncMemory();
     if (pids.length === 0) return;
 
     const childrenByParent: Record<string, string[]> = {};
@@ -119,6 +131,7 @@ export class Kernel {
    * 5. 打印进程统计信息 (每 100 tick)。
    */
   private maintenance(): void {
+    this.syncMemory();
     if (Game.time % 10 !== 0) return;
 
     const now = Game.time;
@@ -205,13 +218,7 @@ export class Kernel {
    */
   constructor() {
     global.kernel = this;
-    if (!Memory.kernel) {
-      Memory.kernel = {
-        processTable: {},
-        processIndex: [],
-      };
-    }
-    this.memory = Memory.kernel;
+    this.syncMemory();
     this.loadProcesses();
   }
 
@@ -272,6 +279,7 @@ export class Kernel {
    * 5. 刷新 Debug 指标。
    */
   public run(): void {
+    this.syncMemory();
     const cpuLimit = Game.cpu.limit;
     const bucket = Game.cpu.bucket;
 
@@ -312,6 +320,10 @@ export class Kernel {
 
       if (process.status === ProcessStatus.Sleeping) {
         const pMem = this.memory.processTable[pid];
+        if (!pMem) {
+          this.killProcess(pid);
+          continue;
+        }
         if (
           pMem.sleepInfo &&
           Game.time >= pMem.sleepInfo.start + pMem.sleepInfo.duration
@@ -320,9 +332,6 @@ export class Kernel {
           pMem.status = ProcessStatus.Running;
           delete pMem.sleepInfo;
         } else if (!pMem.sleepInfo) {
-          console.log(
-            `[Kernel] Process ${pid} is sleeping but missing sleepInfo. Waking up.`,
-          );
           process.status = ProcessStatus.Running;
           pMem.status = ProcessStatus.Running;
         } else {
@@ -370,6 +379,7 @@ export class Kernel {
    * @param process 新创建的进程实例
    */
   public addProcess(process: Process): void {
+    this.syncMemory();
     const pid = process.pid;
     if (this.processTable[pid]) {
       console.log(`[Kernel] Process ${pid} already exists!`);
@@ -400,6 +410,7 @@ export class Kernel {
   }
 
   public getProcessMemory(pid: string): Record<string, unknown> {
+    this.syncMemory();
     const p = this.memory.processTable[pid];
     if (!p) return {};
     if (!p.data) p.data = {};
@@ -407,10 +418,12 @@ export class Kernel {
   }
 
   public getProcessType(pid: string): string | undefined {
+    this.syncMemory();
     return this.memory.processTable[pid]?.type;
   }
 
   public getChildren(pid: string): string[] {
+    this.syncMemory();
     return this.memory.processIndex.filter(childPid => {
         const childMem = this.memory.processTable[childPid];
         return childMem && childMem.parentPID === pid;

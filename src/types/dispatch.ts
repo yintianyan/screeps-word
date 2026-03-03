@@ -21,7 +21,7 @@ export enum TaskType {
   DEFEND = "defend",
 }
 
-// Priority Levels
+// 优先等级
 export enum TaskPriority {
   CRITICAL = 0, // Emergency defense, spawn refill
   HIGH = 1, // Tower refill, decay prevention
