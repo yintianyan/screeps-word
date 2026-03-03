@@ -6,6 +6,7 @@ dist/
 build/
 main.js
 main.js.map
+tools/private-stats/out/
 
 # Logs
 logs/

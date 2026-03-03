@@ -55,17 +55,18 @@ export abstract class Process implements IProcess {
 
   sleep(ticks: number): void {
     this.status = ProcessStatus.Sleeping;
-    // Note: Kernel needs to handle the actual sleep timer logic
-    // We can access kernel now to register sleep if needed, but Kernel.run handles it via memory
     if (this.kernel) {
-       // We could do this.kernel.sleepProcess(this.pid, ticks) if we had that method
-       // But currently Kernel checks memory directly.
-       // We need to update memory for sleep to work properly in Kernel.run()
-       const kMem = Memory.kernel.processTable[this.pid];
-       if (kMem) {
-           kMem.status = ProcessStatus.Sleeping;
-           kMem.sleepInfo = { start: Game.time, duration: ticks };
-       }
+      const kMem = Memory.kernel.processTable[this.pid];
+      if (kMem) {
+        kMem.status = ProcessStatus.Sleeping;
+        kMem.sleepInfo = { start: Game.time, duration: ticks };
+      } else {
+        console.log(
+          `[Process] Sleep failed: PID ${this.pid} not found in Memory.kernel.processTable`,
+        );
+      }
+    } else {
+      console.log(`[Process] Sleep failed: this.kernel is undefined for PID ${this.pid}`);
     }
   }
 

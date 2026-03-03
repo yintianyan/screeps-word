@@ -319,6 +319,12 @@ export class Kernel {
           process.status = ProcessStatus.Running;
           pMem.status = ProcessStatus.Running;
           delete pMem.sleepInfo;
+        } else if (!pMem.sleepInfo) {
+          console.log(
+            `[Kernel] Process ${pid} is sleeping but missing sleepInfo. Waking up.`,
+          );
+          process.status = ProcessStatus.Running;
+          pMem.status = ProcessStatus.Running;
         } else {
           continue;
         }

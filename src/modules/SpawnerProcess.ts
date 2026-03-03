@@ -457,43 +457,48 @@ export class SpawnerProcess extends Process {
               }
             }
 
-            if (minerJobs > 0) continue;
-
-            const isAssigned = (sourceId: string) => {
-              const hasCreep = creeps.some((c) => {
-                if (c.memory.role !== "miner" || c.memory.sourceId !== sourceId)
-                  return false;
-                if (
-                  (c.ticksToLive ?? 1500) <
-                  body.length * 3 + config.SPAWN.REPLACE_BUFFER
-                )
-                  return false;
-                return true;
-              });
-              if (hasCreep) return true;
-
-              const jobs = activeJobs.filter(
-                (j) => j.role === "miner" && j.room === roomName,
-              );
-              for (const j of jobs) {
-                const m = this.kernel.getProcessMemory(j.pid);
-                if (getStringProp(m.memory as unknown, "sourceId") === sourceId)
+            if (minerJobs === 0) {
+              const isAssigned = (sourceId: string) => {
+                const hasCreep = creeps.some((c) => {
+                  if (
+                    c.memory.role !== "miner" ||
+                    c.memory.sourceId !== sourceId
+                  )
+                    return false;
+                  if (
+                    (c.ticksToLive ?? 1500) <
+                    body.length * 3 + config.SPAWN.REPLACE_BUFFER
+                  )
+                    return false;
                   return true;
-              }
-              return false;
-            };
+                });
+                if (hasCreep) return true;
 
-            const unassignedSource = sources.find((s) => !isAssigned(s.id));
-            if (unassignedSource) {
-              this.requestSpawn(room.name, "miner", body, 105, {
-                role: "miner",
-                room: room.name,
-                working: false,
-                homeRoom: room.name,
-                sourceId: unassignedSource.id,
-              });
+                const jobs = activeJobs.filter(
+                  (j) => j.role === "miner" && j.room === roomName,
+                );
+                for (const j of jobs) {
+                  const m = this.kernel.getProcessMemory(j.pid);
+                  if (
+                    getStringProp(m.memory as unknown, "sourceId") === sourceId
+                  )
+                    return true;
+                }
+                return false;
+              };
+
+              const unassignedSource = sources.find((s) => !isAssigned(s.id));
+              if (unassignedSource) {
+                this.requestSpawn(room.name, "miner", body, 105, {
+                  role: "miner",
+                  room: room.name,
+                  working: false,
+                  homeRoom: room.name,
+                  sourceId: unassignedSource.id,
+                });
+                continue; // Added continue here to ensure we stop processing other roles if we decided to spawn a miner
+              }
             }
-            continue;
           }
         }
       }
@@ -521,45 +526,45 @@ export class SpawnerProcess extends Process {
             }
           }
 
-          if (minerJobs > 0) continue;
-
-          const body = buildMinerBody(getSpawnEnergyBudget(room, true));
-          const isAssigned = (sourceId: string) => {
-            const hasCreep = creeps.some((c) => {
-              if (c.memory.role !== "miner" || c.memory.sourceId !== sourceId)
-                return false;
-              if (
-                (c.ticksToLive ?? 1500) <
-                body.length * 3 + config.SPAWN.REPLACE_BUFFER
-              )
-                return false;
-              return true;
-            });
-            if (hasCreep) return true;
-
-            const jobs = activeJobs.filter(
-              (j) => j.role === "miner" && j.room === roomName,
-            );
-            for (const j of jobs) {
-              const m = this.kernel.getProcessMemory(j.pid);
-              if (getStringProp(m.memory as unknown, "sourceId") === sourceId)
+          if (minerJobs === 0) {
+            const body = buildMinerBody(getSpawnEnergyBudget(room, true));
+            const isAssigned = (sourceId: string) => {
+              const hasCreep = creeps.some((c) => {
+                if (c.memory.role !== "miner" || c.memory.sourceId !== sourceId)
+                  return false;
+                if (
+                  (c.ticksToLive ?? 1500) <
+                  body.length * 3 + config.SPAWN.REPLACE_BUFFER
+                )
+                  return false;
                 return true;
-            }
-            return false;
-          };
+              });
+              if (hasCreep) return true;
 
-          const unassignedSource =
-            plannedSources.find((s) => !isAssigned(s.id)) ??
-            sources.find((s) => !isAssigned(s.id));
-          if (unassignedSource) {
-            this.requestSpawn(room.name, "miner", body, 105, {
-              role: "miner",
-              room: room.name,
-              working: false,
-              homeRoom: room.name,
-              sourceId: unassignedSource.id,
-            });
-            continue;
+              const jobs = activeJobs.filter(
+                (j) => j.role === "miner" && j.room === roomName,
+              );
+              for (const j of jobs) {
+                const m = this.kernel.getProcessMemory(j.pid);
+                if (getStringProp(m.memory as unknown, "sourceId") === sourceId)
+                  return true;
+              }
+              return false;
+            };
+
+            const unassignedSource =
+              plannedSources.find((s) => !isAssigned(s.id)) ??
+              sources.find((s) => !isAssigned(s.id));
+            if (unassignedSource) {
+              this.requestSpawn(room.name, "miner", body, 105, {
+                role: "miner",
+                room: room.name,
+                working: false,
+                homeRoom: room.name,
+                sourceId: unassignedSource.id,
+              });
+              continue;
+            }
           }
         }
       }
