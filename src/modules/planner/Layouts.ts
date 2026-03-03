@@ -17,35 +17,7 @@ export type LayoutTemplate = {
 
 const stamp: LayoutTemplate = {
   buildings: {
-    [STRUCTURE_EXTENSION]: [
-      // Inner Ring
-      { x: -1, y: -2 },
-      { x: 0, y: -2 },
-      { x: 1, y: -2 },
-      { x: -2, y: -1 },
-      { x: -1, y: -1 },
-      { x: 1, y: -1 },
-      { x: 2, y: -1 },
-      { x: -2, y: 0 },
-      { x: 2, y: 0 },
-      { x: -2, y: 1 },
-      { x: -1, y: 1 },
-      { x: 1, y: 1 },
-      { x: 2, y: 1 },
-      { x: -1, y: 2 },
-      { x: 0, y: 2 },
-      { x: 1, y: 2 },
-      // Outer Ring parts
-      { x: -3, y: -2 },
-      { x: 3, y: -2 },
-      { x: -3, y: 2 },
-      { x: 3, y: 2 },
-      { x: -2, y: -3 },
-      { x: 2, y: -3 },
-      { x: -2, y: 3 },
-      { x: 2, y: 3 },
-      // ... fill up to 60 extensions
-    ],
+    [STRUCTURE_EXTENSION]: [],
     [STRUCTURE_TOWER]: [
       { x: 0, y: -1 },
       { x: 0, y: 1 },
@@ -56,7 +28,6 @@ const stamp: LayoutTemplate = {
     ],
     [STRUCTURE_ROAD]: [
       // Diamond shape roads around center
-      { x: 0, y: 0 }, // Center access? No, center is Storage
       // Cross
       { x: 0, y: -3 },
       { x: 0, y: 3 },
@@ -134,7 +105,51 @@ for (let x = -5; x <= 5; x++) {
     }
   }
 }
-bunker.buildings[STRUCTURE_ROAD] = bunkerRoads;
+
+const bunkerNonRoadSet = new Set();
+for (const type in bunker.buildings) {
+  const t = type as BuildableStructureConstant;
+  if (t === STRUCTURE_ROAD) continue;
+  const coords = bunker.buildings[type] || [];
+  for (const c of coords) bunkerNonRoadSet.add(`${c.x},${c.y}`);
+}
+bunker.buildings[STRUCTURE_ROAD] = bunkerRoads.filter(
+  (c) => !bunkerNonRoadSet.has(`${c.x},${c.y}`),
+);
+
+function buildStampExtensions() {
+  const reserved = new Set();
+  const core = [
+    { x: 0, y: 0 }, // storage
+    { x: -1, y: 0 }, // link
+    { x: 1, y: 0 }, // terminal
+    { x: 0, y: -4 }, // spawn
+    { x: 0, y: 4 }, // spawn
+    { x: -4, y: 0 }, // spawn
+  ];
+  for (const c of core) reserved.add(`${c.x},${c.y}`);
+  for (const c of stamp.buildings[STRUCTURE_TOWER] || [])
+    reserved.add(`${c.x},${c.y}`);
+  for (const c of stamp.buildings[STRUCTURE_ROAD] || [])
+    reserved.add(`${c.x},${c.y}`);
+
+  const out = [];
+  for (let x = -6; x <= 6; x++) {
+    for (let y = -6; y <= 6; y++) {
+      if (x === 0 && y === 0) continue;
+      if (Math.abs(x) + Math.abs(y) <= 1) continue;
+      if ((x + y) % 2 === 0) continue;
+      if (reserved.has(`${x},${y}`)) continue;
+      out.push({ x, y });
+    }
+  }
+  out.sort(
+    (a, b) => Math.abs(a.x) + Math.abs(a.y) - (Math.abs(b.x) + Math.abs(b.y)),
+  );
+  return out;
+}
+
+stamp.buildings[STRUCTURE_EXTENSION] = buildStampExtensions();
 
 export const Layouts: Record<LayoutName, LayoutTemplate> = {
   stamp,

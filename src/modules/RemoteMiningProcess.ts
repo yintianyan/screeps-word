@@ -361,7 +361,14 @@ function pickHomeEnergyTargetId(room: Room): string | null {
       (s as StructureExtension).store.getFreeCapacity(RESOURCE_ENERGY) > 0,
   })[0] as StructureExtension | undefined;
 
-  return extension ? extension.id : null;
+  if (extension) return extension.id;
+
+  const containers = room.find(FIND_STRUCTURES, {
+    filter: (s) =>
+      s.structureType === STRUCTURE_CONTAINER &&
+      (s as StructureContainer).store.getFreeCapacity(RESOURCE_ENERGY) > 0,
+  }) as StructureContainer[];
+  return containers[0]?.id ?? null;
 }
 
 function pickDroppedEnergyId(room: Room): string | null {
@@ -395,6 +402,22 @@ function pickKeeperTarget(room: Room): Creep | null {
   );
 }
 
+/**
+ * 外矿 (Remote Mining) 进程
+ * 
+ * 负责管理所有外矿房间的运作。
+ * 
+ * 主要职责：
+ * 1. 侦查 (Scouting): 发现并评估邻近房间是否适合作为外矿。
+ * 2. 威胁评估 (Threat Assessment): 监控外矿的安全状况 (入侵者、Source Keeper)。
+ * 3. 设施规划 (Planning): 规划 Container 位置。
+ * 4. 任务分配 (Task Assignment):
+ *    - Scout: 侦查新房间。
+ *    - RemoteHarvester: 移动到外矿 Source 处采集。
+ *    - RemoteHauler: 在外矿和主房之间搬运能量。
+ *    - Reserver: 预订外矿控制器。
+ *    - KeeperKiller/Healer: 清理 Source Keeper。
+ */
 export class RemoteMiningProcess extends Process {
   public run(): void {
     for (const home of getMyRooms()) runRemoteDiscovery(home);

@@ -2,14 +2,36 @@ import { Process, ProcessStatus } from "./Process";
 import { KernelMemory } from "./types";
 import { processRegistry } from "./ProcessRegistry";
 import { config } from "../config";
+import { Debug } from "./Debug";
 
+/**
+ * 内核 (Kernel)
+ * 
+ * 系统的核心调度器，负责管理所有进程 (Process) 的生命周期。
+ * 
+ * 主要职责：
+ * 1. 进程管理：创建、销毁、暂停、恢复进程。
+ * 2. 调度执行：根据优先级调度进程运行。
+ * 3. 内存管理：持久化进程状态到 Memory.kernel。
+ * 4. CPU 保护：监控 CPU 使用率，防止 Bucket 耗尽 (Throttling)。
+ * 5. 垃圾回收：定期清理僵死进程和超时任务。
+ */
 export class Kernel {
+  // 进程表：存储所有活跃的 Process 实例
   private processTable: { [pid: string]: Process } = {};
+  // 内核内存：引用全局 Memory.kernel
   private memory: KernelMemory;
+  // 调度缓存相关
   private sortedTick = -1;
   private sortedLen = 0;
   private sortedPids: string[] = [];
 
+  /**
+   * 获取按优先级排序的 PID 列表
+   * 
+   * 包含缓存机制，同一 tick 内多次调用直接返回缓存结果。
+   * 每 5 tick 强制重排序一次，确保优先级变更能及时生效。
+   */
   private getScheduledPids(): string[] {
     const len = this.memory.processIndex.length;
     if (
@@ -29,6 +51,13 @@ export class Kernel {
     return this.sortedPids;
   }
 
+  /**
+   * 批量终止进程
+   * 
+   * 递归终止指定 PID 及其所有子进程。
+   * 
+   * @param pids 要终止的进程 ID 列表
+   */
   private killMany(pids: string[]): void {
     if (pids.length === 0) return;
 
@@ -78,6 +107,17 @@ export class Kernel {
     this.sortedTick = -1;
   }
 
+  /**
+   * 系统维护
+   * 
+   * 每 10 tick 运行一次。
+   * 功能：
+   * 1. 清理 Memory 中存在但实例不存在的僵死进程。
+   * 2. 清理状态为 Dead 的进程。
+   * 3. 清理超时的 SpawnJob (孵化任务)。
+   * 4. 优化 SpawnJob：如果同一房间同一角色有多个孵化任务，保留优先级最高的。
+   * 5. 打印进程统计信息 (每 100 tick)。
+   */
   private maintenance(): void {
     if (Game.time % 10 !== 0) return;
 
@@ -156,6 +196,13 @@ export class Kernel {
     }
   }
 
+  /**
+   * 初始化内核
+   * 
+   * 1. 挂载全局 global.kernel。
+   * 2. 初始化 Memory.kernel 结构。
+   * 3. 从 Memory 加载所有进程实例。
+   */
   constructor() {
     global.kernel = this;
     if (!Memory.kernel) {
@@ -168,6 +215,12 @@ export class Kernel {
     this.loadProcesses();
   }
 
+  /**
+   * 从内存加载进程
+   * 
+   * 遍历 Memory.kernel.processIndex，实例化所有进程。
+   * 如果进程类未在 ProcessRegistry 中注册，或者加载失败，则杀死该进程。
+   */
   private loadProcesses(): void {
     for (const pid of this.memory.processIndex) {
       const pMem = this.memory.processTable[pid];
@@ -204,6 +257,20 @@ export class Kernel {
     }
   }
 
+  /**
+   * 运行内核主循环
+   * 
+   * 1. 执行维护任务 (Maintenance)。
+   * 2. 计算 CPU 限制和最低运行优先级 (根据 Bucket 状态)。
+   * 3. 获取调度列表并遍历执行进程：
+   *    - 检查 CPU 是否超限 (Throttling)。
+   *    - 跳过 Dead/Suspended 进程。
+   *    - 处理 Sleeping 进程的唤醒逻辑。
+   *    - 执行 Process.run()。
+   *    - 捕获并记录进程崩溃错误。
+   * 4. 采样并记录 CPU 消耗最高的进程类型 (Kernel Profiler)。
+   * 5. 刷新 Debug 指标。
+   */
   public run(): void {
     const cpuLimit = Game.cpu.limit;
     const bucket = Game.cpu.bucket;
@@ -219,6 +286,8 @@ export class Kernel {
         : -Infinity;
 
     const pids = this.getScheduledPids();
+    Debug.gauge("kernel.processes", this.memory.processIndex.length);
+    Debug.gauge("kernel.scheduled", pids.length);
     const sample =
       bucket < config.CPU.BUCKET_LIMIT && Game.time % 10 === 0;
     const byType = sample ? ({} as Record<string, number>) : null;
@@ -282,10 +351,18 @@ export class Kernel {
         .slice(0, 6);
       if (top.length > 0) {
         console.log(`[KernelProf] top=${JSON.stringify(top)}`);
+        Debug.setKernelTop(top);
+        Debug.event("kernel_prof", top);
       }
     }
+    Debug.flushTick();
   }
 
+  /**
+   * 添加新进程
+   * 
+   * @param process 新创建的进程实例
+   */
   public addProcess(process: Process): void {
     const pid = process.pid;
     if (this.processTable[pid]) {

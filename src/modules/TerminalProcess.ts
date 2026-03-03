@@ -11,6 +11,16 @@ function getMyRooms(): Room[] {
   return rooms;
 }
 
+/**
+ * 终端 (Terminal) 进程
+ * 
+ * 负责管理 Terminal 的资源进出。
+ * 
+ * 主要职责：
+ * 1. 能量平衡 (Energy Balancing): 将多余的能量发送到匮乏的房间。
+ * 2. 资源销售 (Sell Excess Minerals): 自动出售过多的矿物换取 Credits。
+ * 3. 资源求购 (尚未实现): 购买缺失的矿物。
+ */
 export class TerminalProcess extends Process {
   public run(): void {
     // Only run every 50 ticks to save CPU

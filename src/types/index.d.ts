@@ -12,7 +12,9 @@ declare global {
     _move?: unknown;
 
     sourceId?: string;
+    sourceType?: 'storage' | 'link' | 'container' | 'source';
     hauling?: boolean;
+    fillCount?: number;
     idleTicks?: number;
     requestingEnergy?: boolean;
     waitingTicks?: number;
@@ -45,6 +47,31 @@ declare global {
     time: number;
   }
 
+  interface DebugEvent {
+    time: number;
+    tag: string;
+    room?: string;
+    creep?: string;
+    pid?: string;
+    data?: unknown;
+  }
+
+  interface DebugTick {
+    time: number;
+    counters?: Record<string, number>;
+    gauges?: Record<string, number>;
+    kernelTop?: Array<[string, number]>;
+  }
+
+  interface DebugStatsMemory {
+    events?: DebugEvent[];
+    ticks?: DebugTick[];
+    counters?: Record<string, number>;
+    gauges?: Record<string, number>;
+    kernelTop?: Array<[string, number]>;
+    lastFlush?: number;
+  }
+
   interface StatsMemory {
     rooms: Record<
       string,
@@ -59,6 +86,7 @@ declare global {
       scheduler: number;
     };
     time: number;
+    debug?: DebugStatsMemory;
   }
 
   interface Memory {
@@ -75,6 +103,14 @@ declare global {
           pending: number;
         };
         cleanupInterval: number;
+      };
+      debug?: {
+        enabled?: boolean;
+        sampleRate?: number;
+        maxEvents?: number;
+        maxTicks?: number;
+        flushInterval?: number;
+        roomFilter?: string[];
       };
     };
     stats?: StatsMemory;

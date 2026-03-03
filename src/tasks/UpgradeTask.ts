@@ -2,6 +2,11 @@ import { TaskProcess } from "./TaskProcess";
 import { runUpgrade } from "./impl/upgrade";
 import { processRegistry } from "../core/ProcessRegistry";
 
+/**
+ * 升级任务
+ * 
+ * 控制 Creep 升级房间控制器 (Controller)。
+ */
 export class UpgradeTask extends TaskProcess {
   protected isValid(): boolean {
     const creep = this.creep;

@@ -2,6 +2,11 @@ import { TaskProcess } from "./TaskProcess";
 import { runHarvest } from "./impl/harvest";
 import { processRegistry } from "../core/ProcessRegistry";
 
+/**
+ * 采集任务
+ * 
+ * 控制 Creep 从 Source 采集能量。
+ */
 export class HarvestTask extends TaskProcess {
   protected isValid(): boolean {
     const creep = this.creep;

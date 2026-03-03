@@ -1,6 +1,7 @@
 import { Process } from "../core/Process";
 import { processRegistry } from "../core/ProcessRegistry";
 import { RecycleTask } from "../tasks/RecycleTask";
+import { Debug } from "../core/Debug";
 
 type Role = string;
 
@@ -20,6 +21,16 @@ function getHomeRoomName(creep: Creep): string | null {
   return null;
 }
 
+/**
+ * Creep 回收进程
+ * 
+ * 负责识别并回收不再需要的 Creep，以节省 CPU 和回收能量。
+ * 
+ * 回收策略：
+ * 1. 退休 (Retire): Creep 寿命即将结束 (TTL < 80) 且未处于工作状态。
+ * 2. 冗余 (Redundant): 某种角色的数量超过了当前需求 (例如从 recover 模式切换回 economy 模式后多余的 Worker)。
+ * 3. 排除列表：Miner, Defender, Remote Creep 等通常不回收。
+ */
 export class CreepRecycleProcess extends Process {
   public run(): void {
     if (Game.time % 5 !== 0) return;
@@ -81,17 +92,35 @@ export class CreepRecycleProcess extends Process {
         ?.mode;
       if (mode === "recover" && role === "worker" && roleCount <= 2) continue;
 
-      if (creep.memory.taskId) {
-        const taskPid = creep.memory.taskId;
-        if (Memory.kernel?.processTable?.[taskPid]) {
-          this.kernel.killProcess(taskPid);
+      const spawn = creep.pos.findClosestByRange(spawns) ?? spawns[0];
+      const pid = `task_recycle_${creep.name}`;
+
+      const existingTaskPid = creep.memory.taskId;
+      if (existingTaskPid && existingTaskPid !== pid) {
+        const existingType = this.kernel.getProcessType(existingTaskPid);
+        const urgent = retire || ttl <= 20;
+        if (existingType && !urgent) {
+          Debug.event(
+            "recycle_deferred",
+            {
+              reason: retire ? "retire" : "ttl",
+              ttl,
+              role,
+              roleCount,
+              existingTaskPid,
+              existingType,
+              intendedTaskPid: pid,
+            },
+            { creep: creep.name, room: creep.room.name, pid },
+          );
+          continue;
         }
+
+        this.kernel.killProcess(existingTaskPid);
         delete creep.memory.taskId;
         delete creep.memory.targetId;
       }
 
-      const spawn = creep.pos.findClosestByRange(spawns) ?? spawns[0];
-      const pid = `task_recycle_${creep.name}`;
       if (!Memory.kernel?.processTable?.[pid]) {
         this.kernel.addProcess(new RecycleTask(pid, this.pid, 95));
       }
@@ -100,6 +129,19 @@ export class CreepRecycleProcess extends Process {
       taskMem.targetId = spawn.id;
 
       creep.memory.taskId = pid;
+      Debug.event(
+        "recycle_assigned",
+        {
+          reason: retire ? "retire" : "ttl",
+          ttl,
+          role,
+          roleCount,
+          prevTaskPid: existingTaskPid,
+          spawnId: spawn.id,
+          mode,
+        },
+        { creep: creep.name, room: creep.room.name, pid },
+      );
     }
   }
 }

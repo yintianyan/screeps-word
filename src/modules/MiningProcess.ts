@@ -110,6 +110,16 @@ function getContainerSiteAt(
   return null;
 }
 
+/**
+ * 规划静态挖矿设施
+ *
+ * 在 RCL 3+ 且 CPU 充足时运行。
+ *
+ * 功能：
+ * 1. 为每个 Source 规划一个 Container 位置 (贴近 Source，便于 Miner 原地作业)。
+ * 2. 如果 Container 不存在，自动创建工地。
+ * 3. 在 RCL 6+ 时，为 Mineral 规划 Extractor 和 Container。
+ */
 function planStaticHarvesting(room: Room): void {
   const rcl = room.controller?.level ?? 0;
   if (rcl < 3) return;
@@ -192,31 +202,54 @@ function planStaticHarvesting(room: Room): void {
   }
 }
 
+import StructureCache from "../utils/structureCache";
+
 function pickFillTargetId(creep: Creep): string | null {
-  const spawns = creep.room.find(FIND_MY_SPAWNS, {
-    filter: (s) => s.store.getFreeCapacity(RESOURCE_ENERGY) > 0,
-  });
+  const spawns = StructureCache.getMyStructures(
+    creep.room,
+    STRUCTURE_SPAWN,
+  ) as StructureSpawn[];
   for (const s of spawns) {
-    if (tryReserve(s.id, creep.name, 1)) return s.id;
+    if (
+      s.store.getFreeCapacity(RESOURCE_ENERGY) > 0 &&
+      tryReserve(s.id, creep.name, 1)
+    )
+      return s.id;
   }
 
-  const towers = creep.room.find(FIND_MY_STRUCTURES, {
-    filter: (s) =>
-      s.structureType === STRUCTURE_TOWER &&
-      (s as StructureTower).store.getFreeCapacity(RESOURCE_ENERGY) > 0,
-  }) as StructureTower[];
+  const towers = StructureCache.getMyStructures(
+    creep.room,
+    STRUCTURE_TOWER,
+  ) as StructureTower[];
+  // Sort by range to minimize travel
   towers.sort((a, b) => creep.pos.getRangeTo(a) - creep.pos.getRangeTo(b));
   for (const t of towers) {
-    if (tryReserve(t.id, creep.name, 1)) return t.id;
+    if (
+      t.store.getFreeCapacity(RESOURCE_ENERGY) > 0 &&
+      tryReserve(t.id, creep.name, 1)
+    )
+      return t.id;
   }
 
-  const extensions = creep.room.find(FIND_MY_STRUCTURES, {
-    filter: (s) =>
-      s.structureType === STRUCTURE_EXTENSION &&
-      (s as StructureExtension).store.getFreeCapacity(RESOURCE_ENERGY) > 0,
-  }) as StructureExtension[];
-  extensions.sort((a, b) => creep.pos.getRangeTo(a) - creep.pos.getRangeTo(b));
-  for (const e of extensions) {
+  const extensions = StructureCache.getMyStructures(
+    creep.room,
+    STRUCTURE_EXTENSION,
+  ) as StructureExtension[];
+  // Optimization: Find closest extension without sorting all
+  // We need to iterate and try reserve, because the closest one might be reserved by others.
+  // To avoid O(N^2) or heavy sorting, we can do a simple pass to find the best candidate that is reservable.
+  // But since we can't easily check reservability without trying (and failing),
+  // we might want to collect a few closest ones and try them.
+  // Or, just revert to sorting but limit the candidates to those needing energy.
+
+  const needyExtensions = extensions.filter(
+    (e) => e.store.getFreeCapacity(RESOURCE_ENERGY) > 0,
+  );
+  needyExtensions.sort(
+    (a, b) => creep.pos.getRangeTo(a) - creep.pos.getRangeTo(b),
+  );
+
+  for (const e of needyExtensions) {
     if (tryReserve(e.id, creep.name, 1)) return e.id;
   }
 
@@ -241,6 +274,16 @@ function getSourceContainer(
   return c;
 }
 
+/**
+ * 挖矿进程
+ *
+ * 负责管理房间内的挖矿作业 (Source & Mineral)。
+ *
+ * 主要职责：
+ * 1. 运行静态挖矿规划 (Container/Extractor)。
+ * 2. 管理 Miner：分配 Source，确保每个 Source 都有 Miner。
+ * 3. 管理 Hauler：分配搬运任务 (从 Source Container 搬运到 Storage/Spawn)。
+ */
 export class MiningProcess extends Process {
   public run(): void {
     for (const room of getMyRooms()) {
@@ -341,8 +384,10 @@ export class MiningProcess extends Process {
     if (
       creep.memory.hauling &&
       creep.store.getUsedCapacity(RESOURCE_ENERGY) === 0
-    )
+    ) {
       creep.memory.hauling = false;
+      creep.memory.fillCount = 0;
+    }
     if (
       !creep.memory.hauling &&
       creep.store.getFreeCapacity(RESOURCE_ENERGY) === 0
@@ -377,11 +422,27 @@ export class MiningProcess extends Process {
           }
         }
       }
+
+      // If we have filled 5 extensions/spawns, force dump to storage if available
+      const fillCount = creep.memory.fillCount ?? 0;
+      if (rcl >= 4 && room.storage && fillCount >= 5) {
+         if (room.storage.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
+           return { type: "TransferTask", data: { targetId: room.storage.id } };
+         }
+      }
+
+      // Otherwise, try to fill extensions/spawns first
+      const id = pickFillTargetId(creep);
+      if (id) {
+        creep.memory.fillCount = (creep.memory.fillCount ?? 0) + 1;
+        return { type: "TransferTask", data: { targetId: id } };
+      }
+
+      // If no extensions to fill, dump to storage
       if (rcl >= 4 && room.storage) {
         return { type: "TransferTask", data: { targetId: room.storage.id } };
       }
-      const id = pickFillTargetId(creep);
-      if (id) return { type: "TransferTask", data: { targetId: id } };
+      
       return null;
     }
 

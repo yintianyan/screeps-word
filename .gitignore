@@ -18,4 +18,5 @@ Thumbs.db
 
 # Screeps specific
 .screeps/
+.env
 

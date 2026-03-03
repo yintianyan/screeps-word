@@ -2,6 +2,11 @@ import { TaskProcess } from "./TaskProcess";
 import { runBuild } from "./impl/build";
 import { processRegistry } from "../core/ProcessRegistry";
 
+/**
+ * 建造任务
+ * 
+ * 控制 Creep 建造工地 (ConstructionSite)。
+ */
 export class BuildTask extends TaskProcess {
   protected isValid(): boolean {
     const creep = this.creep;

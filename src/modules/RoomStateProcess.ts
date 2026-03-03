@@ -2,6 +2,7 @@ import { Process } from "../core/Process";
 import { processRegistry } from "../core/ProcessRegistry";
 import StructureCache from "../utils/structureCache";
 import { config } from "../config";
+import { Debug } from "../core/Debug";
 
 type RoomMode = "recover" | "economy" | "build" | "upgrade" | "defense";
 
@@ -39,6 +40,19 @@ function calcMode(
   return "economy";
 }
 
+/**
+ * 房间状态管理进程
+ *
+ * 负责监控房间的经济和防御状态，并决定当前的运营模式 (Mode)。
+ * 运营模式会影响 SpawnerProcess 的人口策略和 RoomLogisticsProcess 的任务分配。
+ *
+ * 模式定义：
+ * - recover: 恢复模式。RCL 极低、能量极低或 Miner 不足时触发。优先生产 Miner 和 Worker。
+ * - defense: 防御模式。检测到敌对 Creep 时触发。优先生产 Defender 和维修 Rampart。
+ * - build: 建造模式。有工地时触发。Worker 侧重建造。
+ * - upgrade: 升级模式。能量富裕且无工地时触发。Worker 侧重升级 Controller。
+ * - economy: 经济模式。默认状态。平衡发展。
+ */
 export class RoomStateProcess extends Process {
   public run(): void {
     for (const room of getMyRooms()) {
@@ -66,6 +80,16 @@ export class RoomStateProcess extends Process {
 
       const hasSites = StructureCache.getConstructionSites(room).some(
         (s) => s.my,
+      );
+      const mySites = room.find(FIND_MY_CONSTRUCTION_SITES);
+      const myRoadSites = mySites.filter(
+        (s) => s.structureType === STRUCTURE_ROAD,
+      ).length;
+      Debug.gauge(`room.${room.name}.sites.total`, mySites.length);
+      Debug.gauge(`room.${room.name}.sites.road`, myRoadSites);
+      Debug.gauge(
+        `room.${room.name}.sites.nonRoad`,
+        mySites.length - myRoadSites,
       );
       const desiredMode = calcMode(room, minerCoverage, hasSites);
 

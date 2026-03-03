@@ -27,6 +27,33 @@ import { config } from "./config";
 
 let kernel: Kernel | null = null;
 
+/**
+ * 游戏主循环 (Game Loop)
+ *
+ * Screeps 每一 tick 都会执行此函数。
+ *
+ * 主要流程：
+ * 1. 初始化/恢复 Kernel。
+ * 2. 周期性执行垃圾回收 (GC)。
+ * 3. 注册系统级进程 (System Processes) - 如果尚未运行。
+ *    - init: 初始化
+ *    - logistics: 房间物流
+ *    - state: 房间状态监控
+ *    - spawner: 孵化管理
+ *    - mining: 挖矿管理
+ *    - recycle: Creep 回收
+ *    - defense: 防御系统
+ *    - distributor: 高级物流分发
+ *    - links: Link 网络管理
+ * 4. 注册非关键进程 (在 CPU 充足时)。
+ *    - planner: 房间布局规划
+ *    - remote: 外矿管理
+ *    - terminal: 终端管理
+ *    - labs: 实验室管理
+ *    - power: Power 处理
+ * 5. 运行 Kernel 和 TrafficManager。
+ * 6. 记录统计数据 (Stats) 和运行 Dashboard。
+ */
 export const loop = ErrorMapper.wrapLoop(() => {
   const loopStart = Game.cpu.getUsed();
   try {
@@ -119,7 +146,7 @@ export const loop = ErrorMapper.wrapLoop(() => {
     if (Game.cpu.bucket >= config.CPU.BUCKET_LIMIT && Game.time % 5 === 0) {
       for (const roomName in Game.rooms) {
         const room = Game.rooms[roomName];
-        if (room.controller?.my) recordRoomStats(room, 100);
+        if (room.controller?.my) recordRoomStats(room, 5); // Reduce history to 5 to save Memory parsing CPU
       }
     }
 

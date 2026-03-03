@@ -36,31 +36,48 @@ function canPlace(
 
   const pos = new RoomPosition(x, y, room.name);
   const structures = pos.lookFor(LOOK_STRUCTURES);
-  
+
   // Allow roads on ramparts and ramparts on anything
   if (type === STRUCTURE_RAMPART) {
-      if (structures.some(s => s.structureType === STRUCTURE_WALL)) return false;
-      return true;
+    if (structures.some((s) => s.structureType === STRUCTURE_WALL))
+      return false;
+    return true;
   }
   if (type === STRUCTURE_ROAD) {
-      if (structures.some(s => s.structureType !== STRUCTURE_RAMPART && s.structureType !== STRUCTURE_ROAD)) return false;
-      // Roads can coexist with road (redundant) and rampart
-      return true;
+    if (
+      structures.some(
+        (s) =>
+          s.structureType !== STRUCTURE_RAMPART &&
+          s.structureType !== STRUCTURE_ROAD,
+      )
+    )
+      return false;
+    // Roads can coexist with road (redundant) and rampart
+    return true;
   }
 
   // For other structures, must be empty or road/rampart
   if (structures.length > 0) {
-      // If there's a road/rampart, we can place some things on top?
-      // Generally no, unless it's a road site on a road.
-      // But here we check if we can place a NEW structure.
-      // If there is a road, we can place rampart.
-      // If there is a rampart, we can place anything.
-      const blocker = structures.find(s => s.structureType !== STRUCTURE_RAMPART && s.structureType !== STRUCTURE_ROAD);
-      if (blocker) return false;
+    // If there's a road/rampart, we can place some things on top?
+    // Generally no, unless it's a road site on a road.
+    // But here we check if we can place a NEW structure.
+    // If there is a road, we can place rampart.
+    // If there is a rampart, we can place anything.
+    if (structures.some((s) => s.structureType === STRUCTURE_ROAD))
+      return false;
+    const blocker = structures.find(
+      (s) =>
+        s.structureType !== STRUCTURE_RAMPART &&
+        s.structureType !== STRUCTURE_ROAD,
+    );
+    if (blocker) return false;
   }
 
   const sites = pos.lookFor(LOOK_CONSTRUCTION_SITES);
-  if (sites.length > 0) return false;
+  if (sites.length > 0) {
+    if (sites.every((s) => s.structureType === STRUCTURE_ROAD)) return true;
+    return false;
+  }
 
   return true;
 }
@@ -74,11 +91,30 @@ function placeOne(
   // Check if structure already exists
   const pos = new RoomPosition(x, y, room.name);
   const structures = pos.lookFor(LOOK_STRUCTURES);
-  if (structures.some(s => s.structureType === type)) return false;
-  
+  if (structures.some((s) => s.structureType === type)) return false;
+
   // Check if site exists
   const sites = pos.lookFor(LOOK_CONSTRUCTION_SITES);
-  if (sites.some(s => s.structureType === type)) return false;
+  if (sites.some((s) => s.structureType === type)) return false;
+  if (sites.length > 0) {
+    if (
+      type !== STRUCTURE_ROAD &&
+      sites.every((s) => s.structureType === STRUCTURE_ROAD)
+    ) {
+      const creeps = room.find(FIND_MY_CREEPS);
+      for (const s of sites) {
+        if (
+          s.progress > 0 ||
+          creeps.some((c) => (c.memory as any).targetId === s.id)
+        ) {
+          return false;
+        }
+      }
+      for (const s of sites) s.remove();
+    } else {
+      return false;
+    }
+  }
 
   const result = room.createConstructionSite(x, y, type);
   return result === OK;
@@ -108,6 +144,19 @@ function planRoad(
   return placed;
 }
 
+/**
+ * 建筑规划执行器
+ *
+ * 负责在房间内实际放置工地 (ConstructionSite)。
+ *
+ * 核心逻辑：
+ * 1. 确定房间布局锚点 (Anchor)。
+ * 2. 获取当前 RCL 允许的建筑列表。
+ * 3. 检查现有建筑和工地。
+ * 4. 按照布局模板放置新的工地。
+ * 5. 动态规划道路 (连接 Hub 到 Source/Controller)。
+ * 6. 自动清理阻挡发展的旧道路。
+ */
 export class Build {
   public static run(room: Room): void {
     if (!room.controller?.my) return;
@@ -119,31 +168,62 @@ export class Build {
     if (!room.memory.planner)
       room.memory.planner = { layout: getLayoutName(room) };
     if (!room.memory.planner.anchor) room.memory.planner.anchor = anchor;
-    
+
     const rcl = room.controller.level;
     const layoutName = getLayoutName(room);
 
-    const existingSites = room.find(FIND_MY_CONSTRUCTION_SITES).length;
-    if (existingSites >= 10) return;
+    const allSites = room.find(FIND_MY_CONSTRUCTION_SITES);
+    const roadSites = allSites.filter(
+      (s) => s.structureType === STRUCTURE_ROAD,
+    );
+    const nonRoadSites = allSites.length - roadSites.length;
+    if (nonRoadSites >= 10) return;
 
     let placed = 0;
     const maxPerTick = 3;
-    
+
     // 1. Core Layout Structures
     const planned = plannedStructuresForRcl(layoutName, rcl);
-    
-    for (const p of planned) {
-        if (placed >= maxPerTick) break;
-        const x = anchor.x + p.dx;
-        const y = anchor.y + p.dy;
-        
-        if (canPlace(room, x, y, p.type)) {
-            if (placeOne(room, p.type, x, y)) placed++;
-        }
+
+    const extBuilt = room.find(FIND_MY_STRUCTURES, {
+      filter: (s) => s.structureType === STRUCTURE_EXTENSION,
+    }).length;
+    const extDesired = CONTROLLER_STRUCTURES[STRUCTURE_EXTENSION][rcl] ?? 0;
+    const towerBuilt = room.find(FIND_MY_STRUCTURES, {
+      filter: (s) => s.structureType === STRUCTURE_TOWER,
+    }).length;
+    const towerDesired = CONTROLLER_STRUCTURES[STRUCTURE_TOWER][rcl] ?? 0;
+    const allowRoads = extBuilt >= extDesired && towerBuilt >= towerDesired;
+
+    if (!allowRoads && allSites.length >= 90 && roadSites.length > 0) {
+      const toRemove = Math.min(roadSites.length, allSites.length - 80);
+      const creeps = room.find(FIND_MY_CREEPS);
+      let removed = 0;
+      for (let i = 0; i < roadSites.length && removed < toRemove; i++) {
+        const s = roadSites[i];
+        if (
+          s.progress > 0 ||
+          creeps.some((c) => (c.memory as any).targetId === s.id)
+        )
+          continue;
+        s.remove();
+        removed++;
+      }
     }
-    
+
+    for (const p of planned) {
+      if (placed >= maxPerTick) break;
+      if (p.type === STRUCTURE_ROAD && !allowRoads) continue;
+      const x = anchor.x + p.dx;
+      const y = anchor.y + p.dy;
+
+      if (canPlace(room, x, y, p.type)) {
+        if (placeOne(room, p.type, x, y)) placed++;
+      }
+    }
+
     // 2. Roads to Sources / Controller (if budget left)
-    if (rcl >= 3 && placed < maxPerTick) {
+    if (allowRoads && rcl >= 3 && placed < maxPerTick && nonRoadSites < 8) {
       const hub = new RoomPosition(anchor.x, anchor.y, room.name);
       const roadBudget = maxPerTick - placed;
       let roadPlaced = 0;

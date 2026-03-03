@@ -2,6 +2,11 @@ import { TaskProcess } from "./TaskProcess";
 import { runWithdraw } from "./impl/withdraw";
 import { processRegistry } from "../core/ProcessRegistry";
 
+/**
+ * 取物任务
+ * 
+ * 控制 Creep 从 Storage, Container, Tombstone 等结构取出资源。
+ */
 export class WithdrawTask extends TaskProcess {
   protected isValid(): boolean {
     const creep = this.creep;

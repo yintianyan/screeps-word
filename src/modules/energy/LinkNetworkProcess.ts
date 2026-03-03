@@ -211,6 +211,21 @@ function runTransfers(
   }
 }
 
+/**
+ * Link 网络进程
+ * 
+ * 负责管理房间内的 Link 传输网络。
+ * 
+ * 网络拓扑：
+ * - Source Link: 位于 Source 附近，负责发送采集的能量。
+ * - Hub Link: 位于 Storage/Spawn 附近，负责接收能量并转入 Storage，或向 Controller 发送能量。
+ * - Controller Link: 位于 Controller 附近，负责接收能量供 Upgrader 使用。
+ * 
+ * 传输逻辑：
+ * 1. Source Link -> Hub Link (如果 Hub 需要)
+ * 2. Source Link -> Controller Link (如果 Controller 需要)
+ * 3. Hub Link -> Controller Link (如果 Controller 需要且 Hub 能量充足)
+ */
 export class LinkNetworkProcess extends Process {
   public run(): void {
     for (const room of getMyRooms()) {

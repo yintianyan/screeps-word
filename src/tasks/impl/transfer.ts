@@ -36,6 +36,12 @@ function pickEnergyTarget(creep: Creep): TransferTarget | null {
   return null;
 }
 
+/**
+ * 执行转移逻辑
+ * 
+ * @param creep 执行者
+ * @param targetId 目标结构 ID (可选，如果为空则自动寻找需要能量的结构)
+ */
 export function runTransfer(
   creep: Creep,
   targetId?: string,
@@ -62,7 +68,7 @@ export function runTransfer(
 
   if (result === ERR_NOT_IN_RANGE) {
     const moveResult = smartMove(creep, actualTarget, { reusePath: 10, range: 1 });
-    if (moveResult === ERR_NO_PATH) return { status: "failed", reason: "pathBlocked" };
+    if (moveResult === ERR_NO_PATH) return { status: "running" };
     return { status: "running" };
   }
 

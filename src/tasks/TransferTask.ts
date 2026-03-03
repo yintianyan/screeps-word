@@ -2,6 +2,11 @@ import { TaskProcess } from "./TaskProcess";
 import { runTransfer } from "./impl/transfer";
 import { processRegistry } from "../core/ProcessRegistry";
 
+/**
+ * 转移任务
+ * 
+ * 控制 Creep 将能量转移到 Spawn, Extension, Tower, Storage 等结构。
+ */
 export class TransferTask extends TaskProcess {
   protected isValid(): boolean {
     const creep = this.creep;

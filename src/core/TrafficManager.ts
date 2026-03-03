@@ -5,10 +5,28 @@ interface CostCache {
   time: number;
 }
 
+/**
+ * 交通管理器
+ * 
+ * 负责处理 Creep 之间的避让和推挤 (Pushing)。
+ * 
+ * 主要功能：
+ * 1. 维护房间的基础 CostMatrix (地形 + 道路 + 结构)。
+ * 2. 处理 Creep 的推挤请求：当一个 Creep 挡路时，尝试将其推到旁边的空闲位置。
+ * 3. 提供 CostMatrix 回调，用于 PathFinder。
+ */
 export class TrafficManager {
+  // 缓存房间的 CostMatrix，有效期 100 tick
   private static costs: { [roomName: string]: CostCache } = {};
+  // 待处理的推挤请求队列
   private static pushRequests: { pusher: Creep; target: Creep }[] = [];
+  // 记录 Creep 最近被推挤的时间，防止短时间内反复被推
+  private static recentPushUntil: { [targetId: string]: number } = {};
 
+  /**
+   * 获取阻挡者位置 (所有 Creep 和 PowerCreep)
+   * 用于在寻路时避让所有 Creep
+   */
   private static getBlockingPositions(roomName: string): Array<{ x: number; y: number }> {
     return Cache.getTick(`tm:blockers:${roomName}`, () => {
       const room = Game.rooms[roomName];
@@ -22,6 +40,11 @@ export class TrafficManager {
     });
   }
 
+  /**
+   * 获取房间的基础 CostMatrix
+   * 包含地形、道路(1)、容器(2)和 Rampart(2) 的成本。
+   * 其他不可行走结构设为 0xff。
+   */
   public static getCostMatrix(roomName: string, fresh = false): CostMatrix {
     if (
       !fresh &&
@@ -69,14 +92,34 @@ export class TrafficManager {
     };
   }
 
+  /**
+   * 提交推挤请求
+   * 
+   * 当 Creep A 想走到 Creep B 的位置时调用。
+   * 如果 Creep B 最近刚被推过 (冷却中)，则忽略请求。
+   */
   public static requestPush(pusher: Creep, target: Creep) {
+    const until = this.recentPushUntil[target.id];
+    if (typeof until === "number" && until >= Game.time) return;
     this.pushRequests.push({ pusher, target });
   }
 
+  /**
+   * 处理所有推挤请求 (在 tick 结尾调用)
+   * 
+   * 逻辑：
+   * 1. 遍历请求队列。
+   * 2. 为目标 Creep 寻找一个旁边的空闲位置 (Road/Container/Rampart 优先)。
+   * 3. 优先选择“远离推挤者”的位置，避免推到推挤者的路径上。
+   * 4. 移动目标 Creep，并设置临时避让内存 (防止它立刻走回原位)。
+   */
   public static run() {
     const processed = new Set<string>();
+    for (const id in this.recentPushUntil) {
+      if (this.recentPushUntil[id] < Game.time) delete this.recentPushUntil[id];
+    }
 
-    for (const { target } of this.pushRequests) {
+    for (const { pusher, target } of this.pushRequests) {
         if (processed.has(target.id)) continue;
         if (target.fatigue > 0 || target.spawning) continue;
         
@@ -108,8 +151,27 @@ export class TrafficManager {
         }
         
         if (spots.length > 0) {
-            const spot = spots[Math.floor(Math.random() * spots.length)];
+            spots.sort((a, b) => {
+              const da = a.getRangeTo(pusher.pos);
+              const db = b.getRangeTo(pusher.pos);
+              return db - da;
+            });
+            const spot = spots[0];
+            const mem = target.memory as unknown as {
+              _traffic?: {
+                avoidX?: number;
+                avoidY?: number;
+                avoidRoom?: string;
+                avoidUntil?: number;
+              };
+            };
+            if (!mem._traffic) mem._traffic = {};
+            mem._traffic.avoidX = target.pos.x;
+            mem._traffic.avoidY = target.pos.y;
+            mem._traffic.avoidRoom = target.room.name;
+            mem._traffic.avoidUntil = Game.time + 3;
             target.move(target.pos.getDirectionTo(spot));
+            this.recentPushUntil[target.id] = Game.time + 2;
             processed.add(target.id);
         }
     }

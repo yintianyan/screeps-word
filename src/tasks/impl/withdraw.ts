@@ -1,6 +1,13 @@
 import { TaskRunResult } from "../types";
 import { smartMove } from "../move/smartMove";
 
+/**
+ * 执行取物逻辑
+ * 
+ * @param creep 执行者
+ * @param targetId 目标结构 ID (Container, Storage, Link, Tombstone, Ruin)
+ * @param resource 资源类型 (默认为能量)
+ */
 export function runWithdraw(
   creep: Creep,
   targetId?: string,
@@ -24,8 +31,7 @@ export function runWithdraw(
   if (result === OK) return { status: "running" };
   if (result === ERR_NOT_IN_RANGE) {
     const moveResult = smartMove(creep, target, { reusePath: 10, range: 1 });
-    if (moveResult === ERR_NO_PATH)
-      return { status: "failed", reason: "pathBlocked" };
+    if (moveResult === ERR_NO_PATH) return { status: "running" };
     return { status: "running" };
   }
   if (result === ERR_NOT_ENOUGH_RESOURCES) return { status: "completed" };

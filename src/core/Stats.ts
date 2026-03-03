@@ -30,13 +30,30 @@ function countCreepsByRole(room: Room): Record<string, number> {
   return counts;
 }
 
+/**
+ * 记录 CPU 统计信息
+ *
+ * @param stats CPU 使用情况
+ */
 export function recordCpuStats(stats: CpuStats): void {
   const mem = ensureStats();
   mem.cpu = stats;
   mem.time = Game.time;
 }
 
-export function recordRoomStats(room: Room, maxHistory = 100): void {
+/**
+ * 记录房间统计信息
+ *
+ * 包括：RCL, 能量, Creep 数量, Storage 储量, 敌对 Creep 等。
+ * 数据存储在 Memory.stats.rooms[roomName].history 中，用于 Grafana 或 Dashboard 展示。
+ * 
+ * 优化：默认 maxHistory 减少至 5，避免 Memory 过大导致 CPU 解析开销。
+ * 如需长期存储，建议使用 RawMemory。
+ *
+ * @param room 目标房间
+ * @param maxHistory 保留的历史记录长度 (默认 5)
+ */
+export function recordRoomStats(room: Room, maxHistory = 5): void {
   const mem = ensureStats();
   if (!mem.rooms[room.name]) mem.rooms[room.name] = { history: [] };
   const strategy = room.memory.strategy;

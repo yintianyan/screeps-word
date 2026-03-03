@@ -16,6 +16,7 @@ export const Memory = {
   flags: {},
 };
 
-global.Game = Game as any;
-global.Memory = Memory as any;
-global.Constants = {}; // Add screeps constants if needed
+const g = global as any;
+g.Game = Game as any;
+g.Memory = Memory as any;
+g.Constants = {};

@@ -11,6 +11,7 @@ import { UpgradeTask } from "../tasks/UpgradeTask";
 import { BuildTask } from "../tasks/BuildTask";
 import { WithdrawTask } from "../tasks/WithdrawTask";
 import { PickupTask } from "../tasks/PickupTask";
+import { Debug } from "../core/Debug";
 
 type SupportedTask = Extract<
   TaskType,
@@ -118,6 +119,17 @@ function roomNeedsRefill(room: Room): boolean {
   });
 }
 
+function spawnNeedsRefill(room: Room): boolean {
+  const spawns = StructureCache.getMyStructures(
+    room,
+    STRUCTURE_SPAWN,
+  ) as StructureSpawn[];
+  for (const s of spawns) {
+    if (s.store.getFreeCapacity(RESOURCE_ENERGY) > 0) return true;
+  }
+  return false;
+}
+
 function pickClosestReservableId<T extends { id: string; pos: RoomPosition }>(
   creep: Creep,
   targets: T[],
@@ -187,18 +199,17 @@ function pickEnergyTargetId(creep: Creep): string | null {
     creep.room,
     STRUCTURE_EXTENSION,
   ) as StructureExtension[];
-  let bestExtension: StructureExtension | null = null;
-  let bestExtensionRange = 999;
-  for (const e of extensions) {
-    if (e.store.getFreeCapacity(RESOURCE_ENERGY) <= 0) continue;
-    const range = creep.pos.getRangeTo(e);
-    if (range < bestExtensionRange) {
-      bestExtensionRange = range;
-      bestExtension = e;
-    }
+
+  const needyExtensions = extensions.filter(
+    (e) => e.store.getFreeCapacity(RESOURCE_ENERGY) > 0,
+  );
+  needyExtensions.sort(
+    (a, b) => creep.pos.getRangeTo(a) - creep.pos.getRangeTo(b),
+  );
+
+  for (const e of needyExtensions) {
+    if (tryReserve(e.id, creep.name, 1)) return e.id;
   }
-  if (bestExtension && tryReserve(bestExtension.id, creep.name, 1))
-    return bestExtension.id;
 
   const towers = StructureCache.getMyStructures(
     creep.room,
@@ -432,6 +443,34 @@ function pickUpgraderEnergySourceId(creep: Creep): string | null {
   return null;
 }
 
+function pickEnergySinkId(creep: Creep): string | null {
+  const storage = creep.room.storage;
+  if (
+    storage &&
+    storage.store.getFreeCapacity(RESOURCE_ENERGY) > 0 &&
+    tryReserve(storage.id, creep.name, 5)
+  )
+    return storage.id;
+
+  const containers = StructureCache.getStructures(
+    creep.room,
+    STRUCTURE_CONTAINER,
+  ) as StructureContainer[];
+  let best: StructureContainer | null = null;
+  let bestRange = 999;
+  for (const c of containers) {
+    if (c.store.getFreeCapacity(RESOURCE_ENERGY) <= 0) continue;
+    const range = creep.pos.getRangeTo(c);
+    if (range < bestRange) {
+      bestRange = range;
+      best = c;
+    }
+  }
+  if (best && tryReserve(best.id, creep.name, 2)) return best.id;
+
+  return null;
+}
+
 function assignUpgraderTask(
   creep: Creep,
 ): { type: SupportedTask; targetId?: string } | null {
@@ -450,6 +489,8 @@ function assignUpgraderTask(
     const ticksToDowngrade = creep.room.controller?.ticksToDowngrade ?? 10000;
 
     if (!energyHealthy && ticksToDowngrade > 2000) {
+      const sinkId = pickEnergySinkId(creep);
+      if (sinkId) return { type: "transfer", targetId: sinkId };
       return null;
     }
 
@@ -464,10 +505,31 @@ function assignUpgraderTask(
   }
 }
 
+/**
+ * 分配 Worker 任务
+ *
+ * 决策逻辑：
+ * 1. 紧急状态：Controller 快降级了 -> 强制升级 (Upgrade)。
+ *
+ * 2. 取能状态 (Not Working):
+ *    - 捡地上的能量 (Pickup)。
+ *    - 从墓碑/废墟/Storage/Container 取能 (Withdraw)。
+ *    - 挖矿 (Harvest) - 如果没有更好的能量来源。
+ *
+ * 3. 工作状态 (Working):
+ *    - 紧急填充 Spawn (如果 Spawn 能量不足)。
+ *    - 建造 (Build) - 如果有工地且分配人数不足。
+ *    - 常规填充 (Transfer) - 如果没有物流支持 (Distributor/Hauler) 且房间需要能量。
+ *    - 升级 (Upgrade) - 兜底任务。
+ *
+ * @param logisticsSupport 是否有高级物流单位 (Distributor/Hauler)。如果有，Worker 减少搬运工作。
+ */
 function assignTask(
   creep: Creep,
   assigned: Record<string, number>,
-  counts: { upgrade: number; build: number },
+  counts: { upgrade: number; build: number; transfer: number },
+  hasSites: boolean,
+  logisticsSupport: boolean,
 ): { type: SupportedTask; targetId?: string } | null {
   const used = creep.store.getUsedCapacity(RESOURCE_ENERGY);
   const free = creep.store.getFreeCapacity(RESOURCE_ENERGY);
@@ -496,8 +558,26 @@ function assignTask(
   }
 
   const needsRefill = roomNeedsRefill(creep.room);
+  const spawnNeeds = spawnNeedsRefill(creep.room);
 
-  if (needsRefill) {
+  if (
+    spawnNeeds &&
+    (!logisticsSupport ||
+      creep.room.energyAvailable < creep.room.energyCapacityAvailable * 0.5)
+  ) {
+    const targetId = pickEnergyTargetId(creep);
+    if (targetId) return { type: "transfer", targetId };
+  }
+
+  if (hasSites && counts.build < 1) {
+    const siteId = pickConstructionSiteId(creep, assigned);
+    if (siteId) {
+      assigned[siteId] = (assigned[siteId] ?? 0) + 1;
+      return { type: "build", targetId: siteId };
+    }
+  }
+
+  if (needsRefill && !logisticsSupport) {
     const targetId = pickEnergyTargetId(creep);
     if (!targetId) return { type: "upgrade" };
     return { type: "transfer", targetId };
@@ -518,11 +598,31 @@ function assignTask(
   return { type: "upgrade" };
 }
 
+/**
+ * 房间物流进程
+ *
+ * 负责管理房间内的普通 Worker 和 Upgrader。
+ *
+ * 主要职责：
+ * 1. 统计房间内的物流需求（工地、能量填充、升级）。
+ * 2. 监控 Creep 数量和状态。
+ * 3. 为 Worker 和 Upgrader 分配任务。
+ * 4. 记录性能指标 (Metrics)。
+ */
 export class RoomLogisticsProcess extends Process {
   public run(): void {
     for (const room of getMyRooms()) {
       const assigned: Record<string, number> = {};
-      const counts = { upgrade: 0, build: 0 };
+      const counts = { upgrade: 0, build: 0, transfer: 0 };
+      const hasSites = StructureCache.getConstructionSites(room).some(
+        (s) => s.my,
+      );
+      const distributorCount = StructureCache.getCreeps(
+        room,
+        "distributor",
+      ).length;
+      const haulerCount = StructureCache.getCreeps(room, "hauler").length;
+      const logisticsSupport = distributorCount + haulerCount > 0;
 
       let idleWorkerCount = 0;
 
@@ -537,11 +637,18 @@ export class RoomLogisticsProcess extends Process {
           }
         }
 
-        const newTask = assignTask(creep, assigned, counts);
+        const newTask = assignTask(
+          creep,
+          assigned,
+          counts,
+          hasSites,
+          logisticsSupport,
+        );
         if (newTask) {
           this.spawnTask(creep, newTask);
           if (newTask.type === "upgrade") counts.upgrade++;
           if (newTask.type === "build") counts.build++;
+          if (newTask.type === "transfer") counts.transfer++;
         } else {
           idleWorkerCount++;
         }
@@ -564,7 +671,27 @@ export class RoomLogisticsProcess extends Process {
       metrics.idleRate = metrics.idleRate * (1 - alpha) + currentRate * alpha;
       metrics.lastUpdate = Game.time;
 
+      Debug.gauge(`room.${room.name}.workers.total`, workers.length);
+      Debug.gauge(`room.${room.name}.workers.idle`, idleWorkerCount);
+      Debug.gauge(`room.${room.name}.workers.build`, counts.build);
+      Debug.gauge(`room.${room.name}.workers.upgrade`, counts.upgrade);
+      Debug.gauge(`room.${room.name}.workers.transfer`, counts.transfer);
+      Debug.gauge(`room.${room.name}.distributors.total`, distributorCount);
+      Debug.gauge(`room.${room.name}.haulers.total`, haulerCount);
+      let runningBuild = 0;
+      let runningUpgrade = 0;
+      for (const c of workers) {
+        const pid = c.memory.taskId;
+        if (!pid) continue;
+        const t = this.kernel.getProcessType(pid);
+        if (t === "BuildTask") runningBuild++;
+        if (t === "UpgradeTask") runningUpgrade++;
+      }
+      Debug.gauge(`room.${room.name}.workers.runningBuild`, runningBuild);
+      Debug.gauge(`room.${room.name}.workers.runningUpgrade`, runningUpgrade);
+
       const upgraders = StructureCache.getCreeps(room, "upgrader");
+      let upgraderAssigned = 0;
       for (const creep of upgraders) {
         if (creep.memory.taskId) {
           const taskPid = creep.memory.taskId;
@@ -576,8 +703,14 @@ export class RoomLogisticsProcess extends Process {
         }
 
         const newTask = assignUpgraderTask(creep);
-        if (newTask) this.spawnTask(creep, newTask);
+        if (newTask) {
+          this.spawnTask(creep, newTask);
+          upgraderAssigned++;
+        }
       }
+
+      Debug.gauge(`room.${room.name}.upgraders.total`, upgraders.length);
+      Debug.gauge(`room.${room.name}.upgraders.assigned`, upgraderAssigned);
     }
   }
 
@@ -615,6 +748,15 @@ export class RoomLogisticsProcess extends Process {
       mem.targetId = task.targetId;
 
       creep.memory.taskId = pid;
+      Debug.event(
+        "task_assigned",
+        {
+          taskPid: pid,
+          taskType: process.constructor.name,
+          targetId: task.targetId,
+        },
+        { creep: creep.name, room: creep.room.name, pid },
+      );
     }
   }
 }

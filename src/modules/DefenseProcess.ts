@@ -33,6 +33,17 @@ function updateDefenseState(room: Room, hostiles: Creep[], towers: StructureTowe
   room.memory.defense = { hostiles: hostiles.length, lastSeen: Game.time, canFight };
 }
 
+/**
+ * 防御进程
+ * 
+ * 负责房间的防御工作。
+ * 
+ * 主要职责：
+ * 1. 监控敌对 Creep。
+ * 2. 控制 Tower 攻击、治疗和维修 (通过 runTowers)。
+ * 3. 调度 Defender Creep 进行防御。
+ * 4. 在需要时孵化 Defender (虽然代码中主要是调度现有 Defender)。
+ */
 export class DefenseProcess extends Process {
   public run(): void {
     for (const room of getMyRooms()) {

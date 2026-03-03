@@ -39,10 +39,9 @@ describe("MinerTask", () => {
     (global.Game.getObjectById as jest.Mock).mockReturnValue(source);
 
     task = new MinerTask("task1", "parent1", 50);
-    // Inject kernel/memory mock if needed, but for now we test execute directly
-    // Ideally we should mock kernel.getProcessMemory
-    (task as any).kernel = {
-        getProcessMemory: jest.fn(() => ({ sourceId: "source1" }))
+    (global as any).kernel = {
+      getProcessMemory: jest.fn(() => ({ creepName: miner.name, targetId: source.id })),
+      getProcessType: jest.fn(() => "MinerTask"),
     };
   });
 

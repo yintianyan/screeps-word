@@ -1,6 +1,11 @@
 import { TaskRunResult } from "../types";
 import { smartMove } from "../move/smartMove";
 
+/**
+ * 执行升级逻辑
+ * 
+ * @param creep 执行者
+ */
 export function runUpgrade(creep: Creep): TaskRunResult {
   const controller = creep.room.controller;
   if (!controller || !controller.my)

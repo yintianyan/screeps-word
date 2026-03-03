@@ -1,6 +1,12 @@
 import { TaskRunResult } from "../types";
 import { smartMove } from "../move/smartMove";
 
+/**
+ * 执行采集逻辑
+ * 
+ * @param creep 执行者
+ * @param targetId 目标 Source ID (可选，如果为空则自动寻找最近的)
+ */
 export function runHarvest(creep: Creep, targetId?: string): TaskRunResult {
   const target = targetId ? Game.getObjectById<Source>(targetId as Id<Source>) : null;
   const source = target ?? creep.pos.findClosestByRange(FIND_SOURCES);

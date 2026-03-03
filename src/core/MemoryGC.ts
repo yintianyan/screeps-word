@@ -1,3 +1,9 @@
+/**
+ * 清理无效的 Creep 内存
+ *
+ * 遍历 Memory.creeps，删除 Game.creeps 中不存在的 Creep 内存。
+ * 通常在主循环开始时调用。
+ */
 export function gcCreepMemory(): void {
   for (const name in Memory.creeps) {
     if (!Game.creeps[name]) delete Memory.creeps[name];
@@ -42,7 +48,14 @@ export function ensureCreepMemoryDefaults(): void {
   }
 }
 
-export function gcRoomStats(maxHistory = 100): void {
+/**
+ * 清理过期的房间统计历史
+ *
+ * 防止 Memory.stats 无限增长。
+ *
+ * @param maxHistory 保留的最大历史记录条数
+ */
+export function gcRoomStats(maxHistory = 5): void {
   if (!Memory.stats) return;
   for (const roomName in Memory.stats.rooms) {
     const history = Memory.stats.rooms[roomName].history;

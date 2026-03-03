@@ -17,6 +17,20 @@ function getMyRooms(): Room[] {
   return rooms;
 }
 
+/**
+ * 实验室管理进程
+ * 
+ * 负责管理房间内的 Lab 反应。
+ * 
+ * 假设：
+ * 标准布局为 2 个输入 Lab，其余为输出 Lab。
+ * 需要在 Memory 中配置 labs 对象。
+ * 
+ * 功能：
+ * 1. 自动检测 Lab 角色 (Input/Output)。
+ * 2. 执行合成反应 (Run Reaction)。
+ * 3. (未来) 自动调度资源填充和回收。
+ */
 export class LabProcess extends Process {
   public run(): void {
     if (Game.time % 10 !== 0) return;

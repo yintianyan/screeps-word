@@ -4,6 +4,7 @@ import { config } from "../config";
 import { isSourceKeeperRoom } from "../utils/roomName";
 import StructureCache from "../utils/structureCache";
 import { Cache } from "../core/Cache";
+import { Debug } from "../core/Debug";
 import { SpawnJob } from "./SpawnJob";
 
 function bodyCost(body: BodyPartConstant[]): number {
@@ -28,6 +29,14 @@ function buildCarryMoveBody(
   return body.length > 0 ? body : [CARRY, MOVE];
 }
 
+/**
+ * 构建 Worker 身体部件
+ *
+ * 策略：
+ * 1. 基础单元: [WORK, CARRY, MOVE] (成本 200)。
+ * 2. 尽可能多地添加基础单元，直到达到 maxParts (15) 或能量上限。
+ * 3. 至少返回一个基础单元。
+ */
 function buildWorkerBody(energyCapacity: number): BodyPartConstant[] {
   const unit: BodyPartConstant[] = [WORK, CARRY, MOVE];
   const unitCost = bodyCost(unit);
@@ -155,6 +164,22 @@ function buildUpgraderBody(energyCapacity: number): BodyPartConstant[] {
   return body.length > 0 ? body : [WORK, CARRY, MOVE];
 }
 
+/**
+ * 计算期望的 Worker 数量
+ *
+ * 动态调整逻辑：
+ * 1. 基础数量：根据 RCL 设定不同的基准值 (config.POPULATION.WORKER.RCL_TARGETS)。
+ * 2. 工地加成：如果有工地，增加 1 个；如果工地很多且 RCL >= 4，再增加 1 个。
+ * 3. 高级物流减免 (RCL >= 5)：
+ *    - 如果有 2+ Links，减少 worker (因为不需要搬运了)。
+ *    - 如果有 Distributor，减少 worker (因为不需要填补 spawn 了)。
+ * 4. Storage 储量调整：
+ *    - 储量低 -> 增加 worker (加速采集)。
+ *    - 储量高 (RCL >= 5) -> 减少 worker (避免爆仓，节省 CPU)。
+ * 5. 性能指标调整 (Metrics)：
+ *    - 闲置率高 -> 减少 worker。
+ *    - 闲置率低且工地多 -> 增加 worker。
+ */
 function desiredWorkerCount(room: Room): number {
   const rcl = room.controller?.level ?? 0;
   const base =
@@ -290,6 +315,17 @@ function getSpawnEnergyBudget(room: Room, isCritical: boolean): number {
   return capacity;
 }
 
+/**
+ * 孵化进程
+ *
+ * 负责管理所有房间的 Creep 孵化。
+ *
+ * 主要职责：
+ * 1. 检查每个房间的 Creep 存活情况 (Worker, Upgrader, Hauler, Distributor, Miner 等)。
+ * 2. 计算需要补充的 Creep 数量和身体部件。
+ * 3. 生成 SpawnJob 并提交给 Kernel。
+ * 4. 处理特殊角色的孵化 (Defender, RemoteMining 等)。
+ */
 export class SpawnerProcess extends Process {
   public run(): void {
     const children = this.kernel.getChildren(this.pid);
@@ -342,6 +378,23 @@ export class SpawnerProcess extends Process {
       const rcl = room.controller.level;
       const roomJobs = activeJobs.filter((j) => j.room === roomName);
 
+      const extBuilt = room.find(FIND_MY_STRUCTURES, {
+        filter: (s) => s.structureType === STRUCTURE_EXTENSION,
+      }).length;
+      const extDesired = CONTROLLER_STRUCTURES[STRUCTURE_EXTENSION][rcl] ?? 0;
+      const towerBuilt = room.find(FIND_MY_STRUCTURES, {
+        filter: (s) => s.structureType === STRUCTURE_TOWER,
+      }).length;
+      const towerDesired = CONTROLLER_STRUCTURES[STRUCTURE_TOWER][rcl] ?? 0;
+
+      Debug.gauge(`room.${room.name}.creeps.total`, creeps.length);
+      Debug.gauge(`room.${room.name}.creeps.worker`, actualWorkerCount);
+      Debug.gauge(`room.${room.name}.creeps.miner`, actualMinerCount);
+      Debug.gauge(`room.${room.name}.struct.extension`, extBuilt);
+      Debug.gauge(`room.${room.name}.struct.extensionDesired`, extDesired);
+      Debug.gauge(`room.${room.name}.struct.tower`, towerBuilt);
+      Debug.gauge(`room.${room.name}.struct.towerDesired`, towerDesired);
+
       if (creeps.length < 2 && workerCount === 0) {
         const minBody = [WORK, CARRY, MOVE];
         const minCost = bodyCost(minBody);
@@ -350,20 +403,48 @@ export class SpawnerProcess extends Process {
           console.log(
             `[Spawner] EMERGENCY: Requesting recovery worker for ${room.name}`,
           );
+          Debug.event(
+            "spawner_emergency_worker",
+            {
+              energyAvailable: room.energyAvailable,
+              energyCapacity: room.energyCapacityAvailable,
+              minCost,
+            },
+            { room: room.name, pid: this.pid },
+          );
           this.requestSpawn(room.name, "worker", minBody, 100, {
             room: room.name,
             working: false,
           });
           continue;
+        } else if (Game.time % 50 === 0) {
+          // In recovery mode, we might need to recycle existing creeps if we are stuck?
+          // Or just wait.
+          Debug.event(
+            "spawner_stalled_no_energy",
+            { energyAvailable: room.energyAvailable, minCost },
+            { room: room.name, pid: this.pid },
+          );
         }
       }
 
-      if (mode === "recover" && rcl >= 3) {
+      // 修复：在 recover 模式下，如果已有足够 worker，允许孵化 miner
+      // 这里的关键是：如果 worker 足够了，但 miner 还没出来，我们需要确保有足够的能量孵化 miner
+      // Miner 需要较多能量 (5 WORK = 500 + 50 + 50 = 600+)
+      // 如果当前能量不足以孵化完整 Miner，是否应该降级？
+      // buildMinerBody 已经有降级逻辑。
+
+      if (
+        mode === "recover" &&
+        rcl >= 3 &&
+        workerCount >= config.POPULATION.WORKER.MIN
+      ) {
         const sources = StructureCache.getSources(room);
         if (sources.length > 0) {
-          const minerBodySize = buildMinerBody(
-            room.energyCapacityAvailable,
-          ).length;
+          const budget = getSpawnEnergyBudget(room, true);
+          const body = buildMinerBody(budget);
+
+          const minerBodySize = body.length;
           const dyingMiners = getDyingCount("miner", minerBodySize);
           const minerJobs = roomJobs.filter((j) => j.role === "miner").length;
 
@@ -378,7 +459,6 @@ export class SpawnerProcess extends Process {
 
             if (minerJobs > 0) continue;
 
-            const body = buildMinerBody(getSpawnEnergyBudget(room, true));
             const isAssigned = (sourceId: string) => {
               const hasCreep = creeps.some((c) => {
                 if (c.memory.role !== "miner" || c.memory.sourceId !== sourceId)
@@ -418,7 +498,7 @@ export class SpawnerProcess extends Process {
         }
       }
 
-      if (rcl >= 3) {
+      if (rcl >= 3 && workerCount >= config.POPULATION.WORKER.MIN) {
         const sources = StructureCache.getSources(room);
         const planned = room.memory.mining ?? {};
         const plannedSources = sources.filter(
@@ -609,13 +689,15 @@ export class SpawnerProcess extends Process {
         const upgraderCount = count("upgrader");
         let desiredUpgraders = 0;
 
+        const hasExtensionDeficit = extBuilt < extDesired;
+
         const energyHealthy =
           storageEnergy > config.POPULATION.UPGRADER.STORAGE_HEALTHY ||
           room.energyAvailable >
             room.energyCapacityAvailable *
               config.POPULATION.UPGRADER.AVAILABLE_HEALTHY_RATIO;
 
-        if (workerCount >= target && energyHealthy) {
+        if (!hasExtensionDeficit && workerCount >= target && energyHealthy) {
           if (room.controller.level === 8) {
             desiredUpgraders = 1;
           } else if (storageEnergy > config.POPULATION.UPGRADER.STORAGE_RICH) {

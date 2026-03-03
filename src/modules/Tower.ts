@@ -27,6 +27,17 @@ function getMaintenanceRepair(room: Room): Structure | null {
   return targets[0] ?? null;
 }
 
+/**
+ * 运行防御塔逻辑
+ * 
+ * 优先级：
+ * 1. 攻击敌对 Creep (最优先)。
+ * 2. 治疗受伤的己方 Creep。
+ * 3. 紧急维修 (Rampart/Wall 生命值极低)。
+ * 4. 日常维护 (修复受损建筑，保留一定能量)。
+ * 
+ * @param room 目标房间
+ */
 export function runTowers(room: Room): void {
   const towers = room.find(FIND_MY_STRUCTURES, {
     filter: (s) => s.structureType === STRUCTURE_TOWER,

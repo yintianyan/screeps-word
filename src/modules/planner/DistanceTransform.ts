@@ -1,3 +1,17 @@
+/**
+ * 距离变换算法 (Distance Transform)
+ * 
+ * 用于计算地图上每个点到最近墙壁或出口的距离。
+ * 
+ * 用途：
+ * 1. 寻找开阔地带作为基地核心 (Anchor)。
+ * 2. 评估防御塔的覆盖范围。
+ * 
+ * 实现：
+ * 使用切比雪夫距离 (Chebyshev distance) 进行两遍扫描 (Two-pass algorithm) 或 BFS。
+ * 这里实现了一个基于 BFS 的变种。
+ */
+
 type Pos = { x: number; y: number };
 
 type CacheEntry = {
@@ -124,6 +138,15 @@ function scoreAnchor(room: Room, x: number, y: number, wall: Uint8Array, exit: U
   return sw * 5 + se * 3 - Math.floor(dc / 3);
 }
 
+/**
+ * 寻找核心锚点
+ * 
+ * 结合墙壁距离和出口距离，评分选择最适合作为基地中心的位置。
+ * 偏好：远离墙壁，远离出口，靠近 Controller。
+ * 
+ * @param room 目标房间
+ * @param ttl 缓存有效期 (默认 2000 tick)
+ */
 export function findCoreAnchor(room: Room, ttl = 2000): Pos | null {
   const cached = cache[room.name];
   if (cached && Game.time - cached.tick < ttl) return cached.anchor;
