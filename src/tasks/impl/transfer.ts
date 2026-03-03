@@ -45,6 +45,7 @@ function pickEnergyTarget(creep: Creep): TransferTarget | null {
 export function runTransfer(
   creep: Creep,
   targetId?: string,
+  resource: ResourceConstant = RESOURCE_ENERGY,
 ): TaskRunResult {
   const target = targetId ? (Game.getObjectById(targetId as Id<Structure>) as unknown) : null;
   const typedTarget =
@@ -57,12 +58,12 @@ export function runTransfer(
       ? target
       : null;
 
-  const actualTarget = typedTarget ?? pickEnergyTarget(creep);
+  const actualTarget = typedTarget ?? (resource === RESOURCE_ENERGY ? pickEnergyTarget(creep) : null);
   if (!actualTarget) return { status: "failed", reason: "targetInvalid" };
 
-  const result = creep.transfer(actualTarget, RESOURCE_ENERGY);
+  const result = creep.transfer(actualTarget, resource);
   if (result === OK) {
-    if (creep.store.getUsedCapacity(RESOURCE_ENERGY) === 0) return { status: "completed" };
+    if (creep.store.getUsedCapacity(resource) === 0) return { status: "completed" };
     return { status: "running" };
   }
 

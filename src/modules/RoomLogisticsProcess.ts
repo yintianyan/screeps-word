@@ -17,7 +17,11 @@ type SupportedTask = Extract<
   TaskType,
   "pickup" | "harvest" | "withdraw" | "transfer" | "upgrade" | "build"
 >;
-type AssignedTask = { type: SupportedTask; targetId?: string };
+type AssignedTask = {
+  type: SupportedTask;
+  targetId?: string;
+  resourceType?: ResourceConstant;
+};
 
 const sourceSlotsCache: Record<string, number> = {};
 
@@ -58,27 +62,28 @@ function countSourceSlots(source: Source): number {
   return value;
 }
 
-function getDroppedEnergy(room: Room): Resource<RESOURCE_ENERGY>[] {
+function getDroppedResources(room: Room): Resource[] {
   return Cache.getTick(`rl:dropped:${room.name}`, () => {
-    const drops = room.find(FIND_DROPPED_RESOURCES, {
-      filter: (r) => r.resourceType === RESOURCE_ENERGY && r.amount >= 50,
-    }) as Resource<RESOURCE_ENERGY>[];
-    return drops;
+    return room.find(FIND_DROPPED_RESOURCES, {
+      filter: (r) =>
+        (r.resourceType === RESOURCE_ENERGY && r.amount >= 50) ||
+        (r.resourceType !== RESOURCE_ENERGY && r.amount >= 10),
+    }) as Resource[];
   });
 }
 
-function getTombstonesWithEnergy(room: Room): Tombstone[] {
+function getTombstonesWithResources(room: Room): Tombstone[] {
   return Cache.getTick(`rl:tombstones:${room.name}`, () => {
     return room.find(FIND_TOMBSTONES, {
-      filter: (t) => t.store.getUsedCapacity(RESOURCE_ENERGY) > 0,
+      filter: (t) => t.store.getUsedCapacity() > 0,
     });
   });
 }
 
-function getRuinsWithEnergy(room: Room): Ruin[] {
+function getRuinsWithResources(room: Room): Ruin[] {
   return Cache.getTick(`rl:ruins:${room.name}`, () => {
     return room.find(FIND_RUINS, {
-      filter: (r) => r.store.getUsedCapacity(RESOURCE_ENERGY) > 0,
+      filter: (r) => r.store.getUsedCapacity() > 0,
     });
   });
 }
@@ -162,14 +167,18 @@ function pickClosestReservableId<T extends { id: string; pos: RoomPosition }>(
 
 function pickDroppedEnergyId(creep: Creep): string | null {
   if (creep.store.getFreeCapacity(RESOURCE_ENERGY) <= 0) return null;
-  const drops = getDroppedEnergy(creep.room);
+  const drops = getDroppedResources(creep.room).filter(
+    (d): d is Resource<RESOURCE_ENERGY> => d.resourceType === RESOURCE_ENERGY,
+  );
   if (drops.length === 0) return null;
   return pickClosestReservableId(creep, drops, (d) => d.amount);
 }
 
 function pickTombstoneEnergyId(creep: Creep): string | null {
   if (creep.store.getFreeCapacity(RESOURCE_ENERGY) <= 0) return null;
-  const tombstones = getTombstonesWithEnergy(creep.room);
+  const tombstones = getTombstonesWithResources(creep.room).filter(
+    (t) => t.store.getUsedCapacity(RESOURCE_ENERGY) > 0,
+  );
   if (tombstones.length === 0) return null;
   return pickClosestReservableId(creep, tombstones, (t) =>
     t.store.getUsedCapacity(RESOURCE_ENERGY),
@@ -178,11 +187,67 @@ function pickTombstoneEnergyId(creep: Creep): string | null {
 
 function pickRuinEnergyId(creep: Creep): string | null {
   if (creep.store.getFreeCapacity(RESOURCE_ENERGY) <= 0) return null;
-  const ruins = getRuinsWithEnergy(creep.room);
+  const ruins = getRuinsWithResources(creep.room).filter(
+    (r) => r.store.getUsedCapacity(RESOURCE_ENERGY) > 0,
+  );
   if (ruins.length === 0) return null;
   return pickClosestReservableId(creep, ruins, (r) =>
     r.store.getUsedCapacity(RESOURCE_ENERGY),
   );
+}
+
+function pickStoredResource(
+  store: Tombstone["store"] | Ruin["store"],
+): ResourceConstant | null {
+  for (const resource of RESOURCES_ALL) {
+    if (resource === RESOURCE_ENERGY) continue;
+    if (store.getUsedCapacity(resource) > 0) return resource;
+  }
+  if (store.getUsedCapacity(RESOURCE_ENERGY) > 0) return RESOURCE_ENERGY;
+  return null;
+}
+
+function pickDroppedResourceTask(creep: Creep): AssignedTask | null {
+  if (creep.store.getFreeCapacity() <= 0) return null;
+  const drops = getDroppedResources(creep.room);
+  if (drops.length === 0) return null;
+  const targetId = pickClosestReservableId(creep, drops, (d) => d.amount);
+  if (!targetId) return null;
+  return { type: "pickup", targetId };
+}
+
+function pickTombstoneResourceTask(creep: Creep): AssignedTask | null {
+  if (creep.store.getFreeCapacity() <= 0) return null;
+  const tombstones = getTombstonesWithResources(creep.room).filter(
+    (t) => pickStoredResource(t.store) != null,
+  );
+  if (tombstones.length === 0) return null;
+  const targetId = pickClosestReservableId(creep, tombstones, (t) =>
+    t.store.getUsedCapacity(),
+  );
+  if (!targetId) return null;
+  const target = Game.getObjectById(targetId as Id<Tombstone>);
+  if (!(target instanceof Tombstone)) return null;
+  const resourceType = pickStoredResource(target.store);
+  if (!resourceType) return null;
+  return { type: "withdraw", targetId, resourceType };
+}
+
+function pickRuinResourceTask(creep: Creep): AssignedTask | null {
+  if (creep.store.getFreeCapacity() <= 0) return null;
+  const ruins = getRuinsWithResources(creep.room).filter(
+    (r) => pickStoredResource(r.store) != null,
+  );
+  if (ruins.length === 0) return null;
+  const targetId = pickClosestReservableId(creep, ruins, (r) =>
+    r.store.getUsedCapacity(),
+  );
+  if (!targetId) return null;
+  const target = Game.getObjectById(targetId as Id<Ruin>);
+  if (!(target instanceof Ruin)) return null;
+  const resourceType = pickStoredResource(target.store);
+  if (!resourceType) return null;
+  return { type: "withdraw", targetId, resourceType };
 }
 
 function pickEnergyTargetId(creep: Creep): string | null {
@@ -481,7 +546,7 @@ function pickEnergySinkId(creep: Creep): string | null {
 
 function assignUpgraderTask(
   creep: Creep,
-): { type: SupportedTask; targetId?: string } | null {
+): AssignedTask | null {
   const used = creep.store.getUsedCapacity(RESOURCE_ENERGY);
   const free = creep.store.getFreeCapacity(RESOURCE_ENERGY);
 
@@ -538,7 +603,7 @@ function assignTask(
   counts: { upgrade: number; build: number; transfer: number },
   hasSites: boolean,
   logisticsSupport: boolean,
-): { type: SupportedTask; targetId?: string } | null {
+): AssignedTask | null {
   const used = creep.store.getUsedCapacity(RESOURCE_ENERGY);
   const free = creep.store.getFreeCapacity(RESOURCE_ENERGY);
 
@@ -555,8 +620,12 @@ function assignTask(
   }
 
   if (!creep.memory.working) {
-    const dropId = pickDroppedEnergyId(creep);
-    if (dropId) return { type: "pickup", targetId: dropId };
+    const dropTask = pickDroppedResourceTask(creep);
+    if (dropTask) return dropTask;
+    const tombTask = pickTombstoneResourceTask(creep);
+    if (tombTask) return tombTask;
+    const ruinTask = pickRuinResourceTask(creep);
+    if (ruinTask) return ruinTask;
     const energyId = pickEnergySourceId(creep);
     if (energyId) return { type: "withdraw", targetId: energyId };
     const sourceId = pickSourceId(creep, assigned);
@@ -567,6 +636,16 @@ function assignTask(
 
   const needsRefill = roomNeedsRefill(creep.room);
   const spawnNeeds = spawnNeedsRefill(creep.room);
+  const carriedNonEnergy = (RESOURCES_ALL as ResourceConstant[]).find(
+    (r) => r !== RESOURCE_ENERGY && creep.store.getUsedCapacity(r) > 0,
+  );
+  if (carriedNonEnergy) {
+    const sinkId = pickEnergySinkId(creep);
+    if (sinkId) {
+      return { type: "transfer", targetId: sinkId, resourceType: carriedNonEnergy };
+    }
+    return null;
+  }
 
   if (
     spawnNeeds &&
@@ -754,6 +833,7 @@ export class RoomLogisticsProcess extends Process {
       const mem = this.kernel.getProcessMemory(pid);
       mem.creepName = creep.name;
       mem.targetId = task.targetId;
+      if (task.resourceType) mem.resourceType = task.resourceType;
 
       creep.memory.taskId = pid;
       Debug.event(

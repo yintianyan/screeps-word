@@ -603,10 +603,16 @@ export class MiningProcess extends Process {
     if (creep.memory.hauling) {
       // Prioritize Terminal if available and not full
       if (room.terminal && room.terminal.store.getFreeCapacity() > 0) {
-        return { type: "TransferTask", data: { targetId: room.terminal.id } };
+        return {
+          type: "TransferTask",
+          data: { targetId: room.terminal.id, resourceType: mineral.mineralType },
+        };
       }
       if (room.storage && room.storage.store.getFreeCapacity() > 0) {
-        return { type: "TransferTask", data: { targetId: room.storage.id } };
+        return {
+          type: "TransferTask",
+          data: { targetId: room.storage.id, resourceType: mineral.mineralType },
+        };
       }
       return null;
     } else {
@@ -615,7 +621,10 @@ export class MiningProcess extends Process {
         container &&
         container.store.getUsedCapacity(mineral.mineralType) > 0
       ) {
-        return { type: "WithdrawTask", data: { targetId: container.id } };
+        return {
+          type: "WithdrawTask",
+          data: { targetId: container.id, resourceType: mineral.mineralType },
+        };
       }
       // Pickup drops?
       const drop = mineral.pos.findInRange(FIND_DROPPED_RESOURCES, 3, {

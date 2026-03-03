@@ -17,7 +17,11 @@ export class TransferTask extends TaskProcess {
     const creep = this.creep;
     if (!creep) return;
 
-    const result = runTransfer(creep, this.data.targetId);
+    const resourceType =
+      typeof this.data.resourceType === "string"
+        ? (this.data.resourceType as ResourceConstant)
+        : RESOURCE_ENERGY;
+    const result = runTransfer(creep, this.data.targetId, resourceType);
     
     if (result.status === "completed") {
         this.complete();
