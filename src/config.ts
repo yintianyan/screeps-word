@@ -58,6 +58,11 @@ export const config = {
       STORAGE_BUDGET_DIVISOR: 5, // 预算除数
       MIN_BUDGET: 500, // 最小预算
     },
+    HAULER: {
+      REBIND_INTERVAL: 25,
+      PRESSURE_PER_HAULER: 200,
+      SOURCE_DROP_RANGE: 3,
+    },
     DEFENSE: {
       RECENT_HOSTILE_TICKS: 50, // 敌袭状态持续时间
     },

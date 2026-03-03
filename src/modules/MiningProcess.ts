@@ -274,6 +274,26 @@ function getSourceContainer(
   return c;
 }
 
+function getSourceBacklog(room: Room, sourceId: string): number {
+  let backlog = 0;
+  const container = getSourceContainer(room, sourceId);
+  if (container) {
+    backlog += container.store.getUsedCapacity(RESOURCE_ENERGY);
+  }
+  const source = Game.getObjectById(sourceId as Id<Source>);
+  if (source instanceof Source) {
+    const drops = source.pos.findInRange(
+      FIND_DROPPED_RESOURCES,
+      config.POPULATION.HAULER.SOURCE_DROP_RANGE,
+      {
+        filter: (r) => r.resourceType === RESOURCE_ENERGY,
+      },
+    );
+    for (const drop of drops) backlog += drop.amount;
+  }
+  return backlog;
+}
+
 /**
  * 挖矿进程
  *
@@ -386,6 +406,12 @@ export class MiningProcess extends Process {
       const haulers = room.find(FIND_MY_CREEPS, {
         filter: (c) => c.memory.role === "hauler",
       });
+      if (
+        sources.length > 0 &&
+        Game.time % config.POPULATION.HAULER.REBIND_INTERVAL === 0
+      ) {
+        this.rebindHaulersByBacklog(room, haulers, sources);
+      }
       for (const creep of haulers) {
         if (creep.memory.taskId) {
           const taskPid = creep.memory.taskId;
@@ -401,6 +427,53 @@ export class MiningProcess extends Process {
           this.spawnTask(creep, task.type, task.data);
         }
       }
+    }
+  }
+
+  private rebindHaulersByBacklog(
+    room: Room,
+    haulers: Creep[],
+    sources: Source[],
+  ): void {
+    if (haulers.length === 0 || sources.length === 0) return;
+    const sourceIds = sources.map((s) => String(s.id));
+    const sourceIdSet = new Set(sourceIds);
+    const pressure: Record<string, number> = {};
+    for (const sourceId of sourceIds) {
+      pressure[sourceId] = getSourceBacklog(room, sourceId);
+    }
+    for (const hauler of haulers) {
+      const sid = hauler.memory.sourceId;
+      if (!sid || !sourceIdSet.has(sid)) continue;
+      pressure[sid] -= config.POPULATION.HAULER.PRESSURE_PER_HAULER;
+    }
+
+    const candidates = haulers
+      .filter((h) => h.store.getUsedCapacity(RESOURCE_ENERGY) === 0)
+      .sort((a, b) => a.name.localeCompare(b.name));
+    for (const hauler of candidates) {
+      let bestSourceId = sourceIds[0] ?? null;
+      let bestPressure = -Infinity;
+      for (const sourceId of sourceIds) {
+        const p = pressure[sourceId] ?? 0;
+        if (p > bestPressure) {
+          bestPressure = p;
+          bestSourceId = sourceId;
+        }
+      }
+      if (!bestSourceId) return;
+      const current = hauler.memory.sourceId;
+      if (current !== bestSourceId) {
+        hauler.memory.sourceId = bestSourceId;
+        if (hauler.memory.taskId) {
+          this.kernel.killProcess(hauler.memory.taskId);
+          delete hauler.memory.taskId;
+          delete hauler.memory.targetId;
+        }
+      }
+      pressure[bestSourceId] =
+        (pressure[bestSourceId] ?? 0) -
+        config.POPULATION.HAULER.PRESSURE_PER_HAULER;
     }
   }
 
