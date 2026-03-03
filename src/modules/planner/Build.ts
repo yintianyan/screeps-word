@@ -15,7 +15,7 @@ function isInsideRoom(x: number, y: number): boolean {
 
 function getLayoutName(room: Room): LayoutName {
   const name = room.memory.planner?.layout;
-  if (name === "stamp" || name === "bunker") return name;
+  if (name === "stamp" || name === "bunker" || name === "atlas") return name;
   return config.LAYOUT.DEFAULT;
 }
 
@@ -90,12 +90,16 @@ function computeDynamicPlan(room: Room, anchor: Anchor): DynamicPlan {
 
   const matrix = buildBaseMatrix(room);
   for (const target of targets) {
-    const res = PathFinder.search(hub, { pos: target, range: 1 }, {
-      plainCost: 2,
-      swampCost: 8,
-      maxOps: 3000,
-      roomCallback: () => matrix,
-    });
+    const res = PathFinder.search(
+      hub,
+      { pos: target, range: 1 },
+      {
+        plainCost: 2,
+        swampCost: 8,
+        maxOps: 3000,
+        roomCallback: () => matrix,
+      },
+    );
     for (const pos of res.path) {
       if (!isInsideRoom(pos.x, pos.y)) continue;
       roads.add(keyOf(pos.x, pos.y));
@@ -224,7 +228,7 @@ function placeDynamicRoads(
     .sort(
       (a, b) =>
         Math.abs(a.x - anchor.x) +
-          Math.abs(a.y - anchor.y) -
+        Math.abs(a.y - anchor.y) -
         (Math.abs(b.x - anchor.x) + Math.abs(b.y - anchor.y)),
     );
   let placed = 0;

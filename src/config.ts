@@ -92,7 +92,7 @@ export const config = {
     MODE_SWITCH_MIN_TICKS: 50, // 模式切换最小间隔
   },
   LAYOUT: {
-    DEFAULT: "stamp" as "stamp" | "bunker", // 默认布局
+    DEFAULT: "atlas" as "stamp" | "bunker" | "atlas", // 默认布局
     DYNAMIC_INTERVAL: 50,
   },
   BODIES: {

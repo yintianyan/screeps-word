@@ -1,4 +1,4 @@
-export type LayoutName = "stamp" | "bunker";
+export type LayoutName = "stamp" | "bunker" | "atlas";
 
 export type LayoutTemplate = {
   buildings: Record<string, { x: number; y: number }[]>;
@@ -117,6 +117,100 @@ bunker.buildings[STRUCTURE_ROAD] = bunkerRoads.filter(
   (c) => !bunkerNonRoadSet.has(`${c.x},${c.y}`),
 );
 
+const atlas: LayoutTemplate = {
+  buildings: {
+    [STRUCTURE_STORAGE]: [{ x: 0, y: 0 }],
+    [STRUCTURE_TERMINAL]: [{ x: -1, y: 0 }],
+    [STRUCTURE_LINK]: [{ x: 1, y: 0 }],
+    [STRUCTURE_FACTORY]: [{ x: 0, y: 1 }],
+    [STRUCTURE_POWER_SPAWN]: [{ x: 0, y: -1 }],
+    [STRUCTURE_OBSERVER]: [{ x: 2, y: -2 }],
+    [STRUCTURE_NUKER]: [{ x: -2, y: -2 }],
+    [STRUCTURE_SPAWN]: [
+      { x: 0, y: 2 },
+      { x: -2, y: 1 },
+      { x: 2, y: 1 },
+    ],
+    [STRUCTURE_TOWER]: [
+      { x: -3, y: 0 },
+      { x: 3, y: 0 },
+      { x: 0, y: 3 },
+      { x: -1, y: -1 },
+      { x: 1, y: -1 },
+      { x: 0, y: -3 },
+    ],
+    [STRUCTURE_LAB]: [
+      { x: -3, y: -5 },
+      { x: -2, y: -5 },
+      { x: -1, y: -5 },
+      { x: 0, y: -5 },
+      { x: 1, y: -5 },
+      { x: -2, y: -4 },
+      { x: -1, y: -4 },
+      { x: 0, y: -4 },
+      { x: 1, y: -4 },
+      { x: 2, y: -4 },
+    ],
+    [STRUCTURE_EXTENSION]: [],
+    [STRUCTURE_ROAD]: [],
+  },
+};
+
+const atlasRoadRaw: { x: number; y: number }[] = [];
+for (let x = -8; x <= 8; x++) {
+  atlasRoadRaw.push({ x, y: 0 });
+  atlasRoadRaw.push({ x, y: 4 });
+  atlasRoadRaw.push({ x, y: -4 });
+}
+for (let y = -8; y <= 8; y++) {
+  atlasRoadRaw.push({ x: 0, y });
+  atlasRoadRaw.push({ x: 4, y });
+  atlasRoadRaw.push({ x: -4, y });
+}
+for (let d = -6; d <= 6; d++) {
+  atlasRoadRaw.push({ x: d, y: d });
+  atlasRoadRaw.push({ x: d, y: -d });
+}
+const atlasRoadSeen = new Set<string>();
+const atlasRoads: { x: number; y: number }[] = [];
+for (const c of atlasRoadRaw) {
+  const k = `${c.x},${c.y}`;
+  if (atlasRoadSeen.has(k)) continue;
+  atlasRoadSeen.add(k);
+  atlasRoads.push(c);
+}
+const atlasNonRoad = new Set<string>();
+for (const type in atlas.buildings) {
+  const t = type as BuildableStructureConstant;
+  if (t === STRUCTURE_ROAD || t === STRUCTURE_EXTENSION) continue;
+  const coords = atlas.buildings[type] || [];
+  for (const c of coords) atlasNonRoad.add(`${c.x},${c.y}`);
+}
+atlas.buildings[STRUCTURE_ROAD] = atlasRoads.filter(
+  (c) => !atlasNonRoad.has(`${c.x},${c.y}`),
+);
+
+const atlasReserved = new Set<string>();
+for (const type in atlas.buildings) {
+  const t = type as BuildableStructureConstant;
+  if (t === STRUCTURE_EXTENSION) continue;
+  const coords = atlas.buildings[type] || [];
+  for (const c of coords) atlasReserved.add(`${c.x},${c.y}`);
+}
+const atlasExtensions: { x: number; y: number }[] = [];
+for (let x = -9; x <= 9; x++) {
+  for (let y = -9; y <= 9; y++) {
+    if (Math.abs(x) + Math.abs(y) <= 2) continue;
+    if ((x + y) % 2 === 0) continue;
+    if (atlasReserved.has(`${x},${y}`)) continue;
+    atlasExtensions.push({ x, y });
+  }
+}
+atlasExtensions.sort(
+  (a, b) => Math.abs(a.x) + Math.abs(a.y) - (Math.abs(b.x) + Math.abs(b.y)),
+);
+atlas.buildings[STRUCTURE_EXTENSION] = atlasExtensions;
+
 function buildStampExtensions() {
   const reserved = new Set();
   const core = [
@@ -154,6 +248,7 @@ stamp.buildings[STRUCTURE_EXTENSION] = buildStampExtensions();
 export const Layouts: Record<LayoutName, LayoutTemplate> = {
   stamp,
   bunker,
+  atlas,
 };
 
 export type PlannedStructure = {

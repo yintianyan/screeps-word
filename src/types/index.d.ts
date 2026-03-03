@@ -132,7 +132,7 @@ declare global {
     };
     remotes?: string[];
     planner?: {
-      layout: "stamp" | "bunker";
+      layout: "stamp" | "bunker" | "atlas";
       anchor?: { x: number; y: number };
       dynamic?: {
         lastUpdate: number;
