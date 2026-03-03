@@ -210,6 +210,15 @@ declare global {
       workerCount: number;
       idleWorkerCount: number;
     };
+    traffic?: {
+      heat?: {
+        [pos: string]: {
+          value: number;
+          updatedAt: number;
+        };
+      };
+      lastPrune?: number;
+    };
   }
 
   interface Room {

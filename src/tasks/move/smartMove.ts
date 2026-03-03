@@ -38,6 +38,26 @@ export type SmartMoveOptions = {
   maxOps?: number;       // 寻路最大计算量 (默认 2000，卡住时自动增加)
 };
 
+function getTerrainCosts(role: string | undefined): { plainCost: number; swampCost: number } {
+  if (role === "hauler" || role === "distributor") {
+    return { plainCost: 4, swampCost: 12 };
+  }
+  if (role === "worker" || role === "upgrader") {
+    return { plainCost: 3, swampCost: 10 };
+  }
+  return { plainCost: 2, swampCost: 10 };
+}
+
+function getDefaultAvoidRoles(role: string | undefined): string[] {
+  if (role === "worker" || role === "upgrader") {
+    return ["distributor", "hauler", "remoteHauler"];
+  }
+  if (role === "miner") {
+    return ["distributor", "hauler"];
+  }
+  return [];
+}
+
 function getPos(target: SmartMoveTarget): RoomPosition {
   return target instanceof RoomPosition ? target : target.pos;
 }
@@ -96,6 +116,17 @@ function getPositionAtDirection(pos: RoomPosition, direction: DirectionConstant)
     return new RoomPosition(x, y, pos.roomName);
 }
 
+function requestLocalPush(creep: Creep, targetPos: RoomPosition): void {
+  const dir = creep.pos.getDirectionTo(targetPos);
+  const nextPos = getPositionAtDirection(creep.pos, dir);
+  if (!nextPos) return;
+  const blockers = nextPos.lookFor(LOOK_CREEPS);
+  const obstacle = blockers.find((c) => c.my && c.id !== creep.id);
+  if (obstacle) {
+    TrafficManager.requestPush(creep, obstacle);
+  }
+}
+
 /**
  * 执行智能移动
  * 
@@ -112,6 +143,9 @@ export function smartMove(
   const stuck = updateStuck(creep, mem);
   const oscillate = mem.oscillateCount ?? 0;
   const range = opts.range ?? 1;
+  const role = creep.memory.role;
+  const terrainCosts = getTerrainCosts(role);
+  const targetPos = getPos(target);
 
   // 策略调整：如果卡住或震荡，强制不忽略 Creep，让寻路算法看到挡路的人
   const baseIgnoreCreeps = opts.ignoreCreeps ?? true;
@@ -138,6 +172,10 @@ export function smartMove(
       );
     }
   }
+  if (stuck >= 3 || oscillate >= 3) {
+    TrafficManager.recordCongestion(creep.pos, stuck >= 5 ? 6 : 3);
+    requestLocalPush(creep, targetPos);
+  }
   
   // 震荡严重时清空路径，强制重算
   if (oscillate >= 4) mem.path = undefined;
@@ -146,7 +184,7 @@ export function smartMove(
   const reusePath = stuck >= 3 || oscillate >= 3 ? 3 : (opts.reusePath ?? 20);
   const maxOps = opts.maxOps ?? (stuck >= 3 || oscillate >= 3 ? 3000 : 2000);
 
-  const avoidRoles = opts.avoidRoles ?? [];
+  const avoidRoles = opts.avoidRoles ?? getDefaultAvoidRoles(role);
 
   // 构建 CostMatrix 回调
   const costCallback = (roomName: string, costs: CostMatrix): CostMatrix => {
@@ -193,13 +231,13 @@ export function smartMove(
     return resultMatrix;
   };
 
-  const r = creep.moveTo(getPos(target), {
+  const r = creep.moveTo(targetPos, {
     range,
     reusePath,
     ignoreCreeps,
     maxOps,
-    plainCost: 2,
-    swampCost: 10,
+    plainCost: terrainCosts.plainCost,
+    swampCost: terrainCosts.swampCost,
     costCallback,
   });
 
@@ -219,6 +257,9 @@ export function smartMove(
               }
           }
       }
+  }
+  if ((r === ERR_NO_PATH || r === ERR_TIRED) && stuck >= 2) {
+    requestLocalPush(creep, targetPos);
   }
 
   if (r === ERR_NO_PATH && stuck >= 5) {

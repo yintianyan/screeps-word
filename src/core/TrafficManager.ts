@@ -16,12 +16,90 @@ interface CostCache {
  * 3. 提供 CostMatrix 回调，用于 PathFinder。
  */
 export class TrafficManager {
-  // 缓存房间的 CostMatrix，有效期 100 tick
   private static costs: { [roomName: string]: CostCache } = {};
-  // 待处理的推挤请求队列
+  private static callbackCosts: { [key: string]: CostCache } = {};
   private static pushRequests: { pusher: Creep; target: Creep }[] = [];
-  // 记录 Creep 最近被推挤的时间，防止短时间内反复被推
   private static recentPushUntil: { [targetId: string]: number } = {};
+  private static readonly HEAT_DECAY_STEP = 5;
+  private static readonly HEAT_DECAY_AMOUNT = 1;
+  private static readonly HEAT_MAX = 60;
+  private static readonly ROLE_PRIORITY: Record<string, number> = {
+    distributor: 100,
+    hauler: 95,
+    remoteHauler: 92,
+    miner: 80,
+    remoteHarvester: 78,
+    reserver: 75,
+    defender: 74,
+    keeperKiller: 74,
+    keeperHealer: 72,
+    worker: 50,
+    upgrader: 45,
+    scout: 35,
+  };
+
+  private static parseHeatKey(key: string): { x: number; y: number } | null {
+    const parts = key.split(":");
+    if (parts.length !== 2) return null;
+    const x = Number(parts[0]);
+    const y = Number(parts[1]);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    if (x < 0 || x > 49 || y < 0 || y > 49) return null;
+    return { x, y };
+  }
+
+  private static applyHeat(roomName: string, costs: CostMatrix): CostMatrix {
+    const room = Game.rooms[roomName];
+    if (!room) return costs;
+    const traffic = room.memory.traffic;
+    if (!traffic?.heat) return costs;
+
+    if (!traffic.lastPrune || Game.time - traffic.lastPrune >= 25) {
+      for (const key in traffic.heat) {
+        const cell = traffic.heat[key];
+        const elapsed = Game.time - cell.updatedAt;
+        const decay =
+          Math.floor(elapsed / this.HEAT_DECAY_STEP) * this.HEAT_DECAY_AMOUNT;
+        const next = cell.value - decay;
+        if (next <= 0) {
+          delete traffic.heat[key];
+          continue;
+        }
+        cell.value = next;
+        cell.updatedAt = Game.time;
+      }
+      traffic.lastPrune = Game.time;
+    }
+
+    for (const key in traffic.heat) {
+      const pos = this.parseHeatKey(key);
+      if (!pos) continue;
+      const current = costs.get(pos.x, pos.y);
+      if (current >= 0xff) continue;
+      const heat = Math.min(20, traffic.heat[key].value);
+      costs.set(pos.x, pos.y, Math.min(0xfe, current + heat));
+    }
+
+    return costs;
+  }
+
+  public static recordCongestion(pos: RoomPosition, amount = 3): void {
+    const room = Game.rooms[pos.roomName];
+    if (!room) return;
+    room.memory.traffic = room.memory.traffic ?? {};
+    room.memory.traffic.heat = room.memory.traffic.heat ?? {};
+    const key = `${pos.x}:${pos.y}`;
+    const current = room.memory.traffic.heat[key];
+    if (!current) {
+      room.memory.traffic.heat[key] = {
+        value: Math.min(this.HEAT_MAX, amount),
+        updatedAt: Game.time,
+      };
+      return;
+    }
+    current.value = Math.min(this.HEAT_MAX, current.value + amount);
+    current.updatedAt = Game.time;
+  }
 
   /**
    * 获取阻挡者位置 (所有 Creep 和 PowerCreep)
@@ -45,13 +123,17 @@ export class TrafficManager {
    * 包含地形、道路(1)、容器(2)和 Rampart(2) 的成本。
    * 其他不可行走结构设为 0xff。
    */
-  public static getCostMatrix(roomName: string, fresh = false): CostMatrix {
+  public static getCostMatrix(
+    roomName: string,
+    fresh = false,
+    clone = true,
+  ): CostMatrix {
     if (
       !fresh &&
       this.costs[roomName] &&
       Game.time - this.costs[roomName].time < 100
     ) {
-      return this.costs[roomName].matrix.clone();
+      return clone ? this.costs[roomName].matrix.clone() : this.costs[roomName].matrix;
     }
 
     const room = Game.rooms[roomName];
@@ -75,20 +157,25 @@ export class TrafficManager {
     });
 
     this.costs[roomName] = { matrix: costs, time: Game.time };
-    return costs.clone();
+    return clone ? costs.clone() : costs;
   }
 
   public static getCallback(
     avoidCreeps = false,
   ): (roomName: string, costs: CostMatrix) => CostMatrix {
     return (roomName: string, _costs: CostMatrix): CostMatrix => {
-      const costs = this.getCostMatrix(roomName).clone();
-      
+      const cacheKey = `${roomName}:${avoidCreeps ? 1 : 0}`;
+      const hit = this.callbackCosts[cacheKey];
+      if (hit && hit.time === Game.time) return hit.matrix.clone();
+
+      const costs = this.getCostMatrix(roomName, false, false).clone();
       if (avoidCreeps) {
         const blockers = this.getBlockingPositions(roomName);
         for (const p of blockers) costs.set(p.x, p.y, 0xff);
       }
-      return costs;
+      this.applyHeat(roomName, costs);
+      this.callbackCosts[cacheKey] = { matrix: costs, time: Game.time };
+      return costs.clone();
     };
   }
 
@@ -102,6 +189,92 @@ export class TrafficManager {
     const until = this.recentPushUntil[target.id];
     if (typeof until === "number" && until >= Game.time) return;
     this.pushRequests.push({ pusher, target });
+  }
+
+  private static isWalkableAndFree(pos: RoomPosition): boolean {
+    const terrain = Game.map.getRoomTerrain(pos.roomName);
+    if (terrain.get(pos.x, pos.y) === TERRAIN_MASK_WALL) return false;
+    const creeps = pos.lookFor(LOOK_CREEPS);
+    if (creeps.length > 0) return false;
+    const powerCreeps = pos.lookFor(LOOK_POWER_CREEPS);
+    if (powerCreeps.length > 0) return false;
+    const structures = pos.lookFor(LOOK_STRUCTURES);
+    if (
+      structures.some(
+        (s) =>
+          s.structureType !== STRUCTURE_ROAD &&
+          s.structureType !== STRUCTURE_CONTAINER &&
+          (s.structureType !== STRUCTURE_RAMPART ||
+            !(s as StructureRampart).my),
+      )
+    )
+      return false;
+    return true;
+  }
+
+  private static getPosAtDirection(
+    pos: RoomPosition,
+    direction: DirectionConstant,
+  ): RoomPosition | null {
+    const dx = [0, 0, 1, 1, 1, 0, -1, -1, -1][direction];
+    const dy = [0, -1, -1, 0, 1, 1, 1, 0, -1][direction];
+    const x = pos.x + dx;
+    const y = pos.y + dy;
+    if (x < 0 || x > 49 || y < 0 || y > 49) return null;
+    return new RoomPosition(x, y, pos.roomName);
+  }
+
+  private static getRolePriority(role: string | undefined): number {
+    if (!role) return 50;
+    return this.ROLE_PRIORITY[role] ?? 50;
+  }
+
+  private static countPassableNeighbors(pos: RoomPosition): number {
+    let count = 0;
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        if (dx === 0 && dy === 0) continue;
+        const x = pos.x + dx;
+        const y = pos.y + dy;
+        if (x <= 0 || x >= 49 || y <= 0 || y >= 49) continue;
+        if (this.isWalkableAndFree(new RoomPosition(x, y, pos.roomName))) count++;
+      }
+    }
+    return count;
+  }
+
+  private static isSingleLaneConflict(pusher: Creep, target: Creep): boolean {
+    const p = this.countPassableNeighbors(pusher.pos);
+    const t = this.countPassableNeighbors(target.pos);
+    return p <= 2 || t <= 2;
+  }
+
+  private static applyTrafficAvoidMark(creep: Creep): void {
+    const mem = creep.memory as unknown as {
+      _traffic?: {
+        avoidX?: number;
+        avoidY?: number;
+        avoidRoom?: string;
+        avoidUntil?: number;
+      };
+    };
+    if (!mem._traffic) mem._traffic = {};
+    mem._traffic.avoidX = creep.pos.x;
+    mem._traffic.avoidY = creep.pos.y;
+    mem._traffic.avoidRoom = creep.room.name;
+    mem._traffic.avoidUntil = Game.time + 3;
+  }
+
+  private static tryYield(ceder: Creep, other: Creep): boolean {
+    const backDir = other.pos.getDirectionTo(ceder.pos);
+    const backPos = this.getPosAtDirection(ceder.pos, backDir);
+    if (backPos && this.isWalkableAndFree(backPos)) {
+      this.applyTrafficAvoidMark(ceder);
+      ceder.move(backDir);
+      this.recentPushUntil[ceder.id] = Game.time + 2;
+      return true;
+    }
+    return false;
   }
 
   /**
@@ -122,6 +295,19 @@ export class TrafficManager {
     for (const { pusher, target } of this.pushRequests) {
         if (processed.has(target.id)) continue;
         if (target.fatigue > 0 || target.spawning) continue;
+        if (processed.has(pusher.id)) continue;
+
+        const pusherPriority = this.getRolePriority(pusher.memory.role);
+        const targetPriority = this.getRolePriority(target.memory.role);
+        if (
+          this.isSingleLaneConflict(pusher, target) &&
+          pusherPriority < targetPriority
+        ) {
+          if (this.tryYield(pusher, target)) {
+            processed.add(pusher.id);
+            continue;
+          }
+        }
         
         const terrain = target.room.getTerrain();
         const spots: RoomPosition[] = [];
@@ -157,22 +343,26 @@ export class TrafficManager {
               return db - da;
             });
             const spot = spots[0];
-            const mem = target.memory as unknown as {
-              _traffic?: {
-                avoidX?: number;
-                avoidY?: number;
-                avoidRoom?: string;
-                avoidUntil?: number;
-              };
-            };
-            if (!mem._traffic) mem._traffic = {};
-            mem._traffic.avoidX = target.pos.x;
-            mem._traffic.avoidY = target.pos.y;
-            mem._traffic.avoidRoom = target.room.name;
-            mem._traffic.avoidUntil = Game.time + 3;
+            this.applyTrafficAvoidMark(target);
             target.move(target.pos.getDirectionTo(spot));
             this.recentPushUntil[target.id] = Game.time + 2;
             processed.add(target.id);
+        } else {
+            const awayDir = pusher.pos.getDirectionTo(target.pos);
+            const fallback = this.getPosAtDirection(target.pos, awayDir);
+            if (fallback && this.isWalkableAndFree(fallback)) {
+              this.applyTrafficAvoidMark(target);
+              target.move(awayDir);
+              this.recentPushUntil[target.id] = Game.time + 2;
+              processed.add(target.id);
+            } else if (
+              this.isSingleLaneConflict(pusher, target) &&
+              pusherPriority < targetPriority
+            ) {
+              if (this.tryYield(pusher, target)) {
+                processed.add(pusher.id);
+              }
+            }
         }
     }
     this.pushRequests = [];
