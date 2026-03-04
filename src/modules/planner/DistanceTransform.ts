@@ -1,17 +1,3 @@
-/**
- * 距离变换算法 (Distance Transform)
- * 
- * 用于计算地图上每个点到最近墙壁或出口的距离。
- * 
- * 用途：
- * 1. 寻找开阔地带作为基地核心 (Anchor)。
- * 2. 评估防御塔的覆盖范围。
- * 
- * 实现：
- * 使用切比雪夫距离 (Chebyshev distance) 进行两遍扫描 (Two-pass algorithm) 或 BFS。
- * 这里实现了一个基于 BFS 的变种。
- */
-
 type Pos = { x: number; y: number };
 
 type CacheEntry = {
@@ -34,40 +20,38 @@ function computeDistancesToWall(room: Room): Uint8Array {
   const dist = new Uint8Array(50 * 50);
   dist.fill(255);
 
-  const qx: number[] = [];
-  const qy: number[] = [];
+  const queue = new Int16Array(50 * 50 * 2);
+  let head = 0;
+  let tail = 0;
 
   for (let y = 0; y < 50; y++) {
     for (let x = 0; x < 50; x++) {
       if (terrain.get(x, y) === TERRAIN_MASK_WALL) {
         dist[idx(x, y)] = 0;
-        qx.push(x);
-        qy.push(y);
+        queue[tail++] = x;
+        queue[tail++] = y;
       }
     }
   }
 
-  for (let qi = 0; qi < qx.length; qi++) {
-    const x = qx[qi];
-    const y = qy[qi];
+  const dirs = [-1, 0, 1, 0, 0, -1, 0, 1];
+
+  while (head < tail) {
+    const x = queue[head++];
+    const y = queue[head++];
     const d = dist[idx(x, y)];
     const nd = d + 1;
     if (nd >= 255) continue;
 
-    const n = [
-      { x: x - 1, y },
-      { x: x + 1, y },
-      { x, y: y - 1 },
-      { x, y: y + 1 },
-    ];
-
-    for (const p of n) {
-      if (!inBounds(p.x, p.y)) continue;
-      const i = idx(p.x, p.y);
+    for (let di = 0; di < 8; di += 2) {
+      const nx = x + dirs[di];
+      const ny = y + dirs[di + 1];
+      if (!inBounds(nx, ny)) continue;
+      const i = idx(nx, ny);
       if (dist[i] <= nd) continue;
       dist[i] = nd;
-      qx.push(p.x);
-      qy.push(p.y);
+      queue[tail++] = nx;
+      queue[tail++] = ny;
     }
   }
 
@@ -79,58 +63,64 @@ function computeDistancesToExit(room: Room): Uint8Array {
   const dist = new Uint8Array(50 * 50);
   dist.fill(255);
 
-  const qx: number[] = [];
-  const qy: number[] = [];
+  const queue = new Int16Array(50 * 50 * 2);
+  let head = 0;
+  let tail = 0;
 
   for (let i = 0; i < 50; i++) {
-    const edge: Pos[] = [
+    const edges = [
       { x: i, y: 0 },
       { x: i, y: 49 },
       { x: 0, y: i },
       { x: 49, y: i },
     ];
-    for (const p of edge) {
+    for (let ei = 0; ei < edges.length; ei++) {
+      const p = edges[ei];
       if (terrain.get(p.x, p.y) === TERRAIN_MASK_WALL) continue;
       const j = idx(p.x, p.y);
       if (dist[j] === 0) continue;
       dist[j] = 0;
-      qx.push(p.x);
-      qy.push(p.y);
+      queue[tail++] = p.x;
+      queue[tail++] = p.y;
     }
   }
 
-  for (let qi = 0; qi < qx.length; qi++) {
-    const x = qx[qi];
-    const y = qy[qi];
+  const dirs = [-1, 0, 1, 0, 0, -1, 0, 1];
+
+  while (head < tail) {
+    const x = queue[head++];
+    const y = queue[head++];
     const d = dist[idx(x, y)];
     const nd = d + 1;
     if (nd >= 255) continue;
 
-    const n = [
-      { x: x - 1, y },
-      { x: x + 1, y },
-      { x, y: y - 1 },
-      { x, y: y + 1 },
-    ];
-
-    for (const p of n) {
-      if (!inBounds(p.x, p.y)) continue;
-      if (terrain.get(p.x, p.y) === TERRAIN_MASK_WALL) continue;
-      const i = idx(p.x, p.y);
+    for (let di = 0; di < 8; di += 2) {
+      const nx = x + dirs[di];
+      const ny = y + dirs[di + 1];
+      if (!inBounds(nx, ny)) continue;
+      if (terrain.get(nx, ny) === TERRAIN_MASK_WALL) continue;
+      const i = idx(nx, ny);
       if (dist[i] <= nd) continue;
       dist[i] = nd;
-      qx.push(p.x);
-      qy.push(p.y);
+      queue[tail++] = nx;
+      queue[tail++] = ny;
     }
   }
 
   return dist;
 }
 
-function scoreAnchor(room: Room, x: number, y: number, wall: Uint8Array, exit: Uint8Array): number {
+function scoreAnchor(
+  room: Room,
+  x: number,
+  y: number,
+  wall: Uint8Array,
+  exit: Uint8Array,
+): number {
   const controller = room.controller;
-  const dc =
-    controller ? Math.abs(controller.pos.x - x) + Math.abs(controller.pos.y - y) : 25;
+  const dc = controller
+    ? Math.abs(controller.pos.x - x) + Math.abs(controller.pos.y - y)
+    : 25;
   const dw = wall[idx(x, y)];
   const de = exit[idx(x, y)];
   const sw = Math.min(dw, 10);
@@ -138,15 +128,6 @@ function scoreAnchor(room: Room, x: number, y: number, wall: Uint8Array, exit: U
   return sw * 5 + se * 3 - Math.floor(dc / 3);
 }
 
-/**
- * 寻找核心锚点
- * 
- * 结合墙壁距离和出口距离，评分选择最适合作为基地中心的位置。
- * 偏好：远离墙壁，远离出口，靠近 Controller。
- * 
- * @param room 目标房间
- * @param ttl 缓存有效期 (默认 2000 tick)
- */
 export function findCoreAnchor(room: Room, ttl = 2000): Pos | null {
   const cached = cache[room.name];
   if (cached && Game.time - cached.tick < ttl) return cached.anchor;
@@ -163,8 +144,6 @@ export function findCoreAnchor(room: Room, ttl = 2000): Pos | null {
       if (terrain.get(x, y) === TERRAIN_MASK_WALL) continue;
       const dw = wall[idx(x, y)];
       const de = exit[idx(x, y)];
-      // Atlas core radius is about 5-6. 
-      // Ensure anchor is at least 5 tiles away from walls to fit the core.
       if (dw < 6 || de < 4) continue;
 
       const score = scoreAnchor(room, x, y, wall, exit);
