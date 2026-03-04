@@ -1,3 +1,4 @@
+
 import { DispatchMemory, LifecycleMemory } from "./dispatch";
 import { KernelMemory } from "../core/types";
 
@@ -26,8 +27,9 @@ declare global {
     targetRoom?: string;
     homeRoom?: string;
     _moveRequest?: unknown;
+    _lastScan?: string;
     workerStickyTask?: {
-      type: "pickup" | "harvest" | "withdraw" | "transfer" | "upgrade" | "build";
+      type: "pickup" | "harvest" | "withdraw" | "transfer" | "upgrade" | "build" | "repair";
       targetId?: string;
       resourceType?: ResourceConstant;
       until: number;
@@ -126,6 +128,65 @@ declare global {
     traffic?: TrafficStatsMemory;
   }
 
+  // --- Room Intel Data Structure ---
+  interface RoomIntelData {
+    updatedAt: number; // 上次更新 tick
+    owner?: string; // 拥有者
+    rcl?: number; // RCL 等级
+    
+    // 地形与资源
+    sources?: { x: number; y: number; id?: string }[];
+    mineral?: { x: number; y: number; type: MineralConstant; id?: string };
+    
+    // 敌对信息
+    hostiles?: number; // 敌方 Creep 数量
+    towers?: number; // 敌方塔数量
+    invaderCore?: boolean; // 是否有 Invader Core
+    
+    // 导航信息
+    exits?: Partial<Record<DirectionConstant, string>>; // 出口连接的房间
+    sk?: boolean; // 是否是 Source Keeper 房间
+    center?: boolean; // 是否是中心房 (Highway/Sector Center)
+  }
+  
+  interface IntelMemory {
+    rooms: Record<string, RoomIntelData>;
+    requests: string[]; // 待探索房间列表
+  }
+
+  interface WarSpawnRequest {
+    id: string;
+    roomName: string;
+    role: string;
+    body: BodyPartConstant[];
+    priority: number;
+    memory: CreepMemory;
+    status: "pending" | "processing" | "completed";
+  }
+
+  interface WarMemory {
+    spawnRequests: WarSpawnRequest[];
+    campaigns: Record<string, CampaignData>;
+  }
+
+  interface CampaignData {
+    targetRoom: string;
+    type: "harass" | "dismantle" | "capture" | "drain";
+    state: "spawning" | "rallying" | "attacking" | "completed" | "failed";
+    squads: SquadData[];
+    originRoom: string;
+    startTime: number;
+  }
+
+  interface SquadData {
+    id: string;
+    type: "duo" | "quad" | "solo";
+    creeps: string[]; // Creep names
+    role: "attacker" | "healer" | "dismantler" | "claimer";
+    state: "spawning" | "rallying" | "moving" | "engaging";
+    rallyPos?: { x: number; y: number; roomName: string };
+  }
+
   interface Memory {
     uuid: number;
     log: unknown;
@@ -154,6 +215,8 @@ declare global {
     lifecycle: LifecycleMemory;
     dispatch: DispatchMemory;
     kernel: KernelMemory;
+    intel?: IntelMemory; // 全局 Intel 内存
+    war?: WarMemory; // 战争模块内存
     _logFlood: unknown;
   }
 
@@ -169,7 +232,7 @@ declare global {
     };
     remotes?: string[];
     planner?: {
-      layout: "stamp" | "bunker" | "atlas";
+      layout: "stamp" | "bunker" | "atlas" | "auto";
       anchor?: { x: number; y: number };
       dynamic?: {
         lastUpdate: number;
@@ -268,6 +331,11 @@ declare global {
     interface Global {
       log: unknown;
       kernel: import("../core/Kernel").Kernel;
+      War: {
+        attack: (target: string, origin: string, type?: "harass" | "dismantle" | "capture" | "drain") => string;
+        list: () => void;
+        stop: (id: string) => void;
+      };
     }
   }
 }

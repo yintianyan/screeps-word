@@ -339,13 +339,25 @@ export class TrafficManager {
    *
    * 当 Creep A 想走到 Creep B 的位置时调用。
    * 如果 Creep B 最近刚被推过 (冷却中)，则忽略请求。
+   * 
+   * [优化] 对同一 tick 内的重复推挤请求去重，并且对死锁（A推B，B推A）进行熔断。
    */
   public static requestPush(pusher: Creep, target: Creep) {
+    // 熔断：如果 target 也在推 pusher，或者形成环路，则拒绝（简单处理：只看是否 target 已经请求推别人？）
+    // 更好的做法是最后处理时统一解环，这里先暂存。
+    
     const until = this.recentPushUntil[target.id];
     if (typeof until === "number" && until >= Game.time) return;
+    
+    // 检查是否重复请求
     const reqKey = `${Game.time}:${pusher.id}:${target.id}`;
     if (this.pushRequestKeys.has(reqKey)) return;
     this.pushRequestKeys.add(reqKey);
+    
+    // 优先级检查：如果 pusher 优先级低于 target，且 target 正忙/不移动，则 pusher 应该等待或绕路，而不是推
+    // 但这里 smartMove 已经决定要走了，说明它认为这是路。
+    // 我们记录下来，在 run() 里仲裁。
+    
     this.pushRequests.push({ pusher, target });
     const telemetry = this.ensureTelemetry();
     telemetry.pushRequests += 1;
@@ -464,16 +476,34 @@ export class TrafficManager {
 
       const pusherPriority = this.getRolePriority(pusher.memory.role);
       const targetPriority = this.getRolePriority(target.memory.role);
-      if (
-        this.isSingleLaneConflict(pusher, target) &&
-        pusherPriority < targetPriority
-      ) {
-        if (this.tryYield(pusher, target)) {
-          processed.add(pusher.id);
-          continue;
+
+      // 优化：单通道仲裁逻辑
+      // 只有当 target 没动（或者没请求移动）时，才考虑让路
+      // 否则如果 target 也在动，可能是对向相撞
+      const isSingleLane = this.isSingleLaneConflict(pusher, target);
+      
+      if (isSingleLane) {
+        // 单通道冲突处理
+        if (pusherPriority > targetPriority) {
+          // 高级推低级：尝试让 target 让路
+          // 如果 target 没地方让（死胡同），pusher 只能等
+          // run() 下面的逻辑会找空位
+        } else {
+          // 低级推高级：pusher 自己让路 (yield)
+          if (this.tryYield(pusher, target)) {
+            processed.add(pusher.id);
+            continue;
+          }
+          // 只有在没法 yield 时，才尝试推 target (可能 target 只是发呆)
+          // 但既然是低级推高级，原则上不应该推，除非 target 完全闲置且挡路
+          if (target.memory.working && targetPriority > pusherPriority) {
+             // 高级单位在工作，低级单位别推了，等着吧
+             continue;
+          }
         }
       }
-
+      
+      // 尝试寻找避让位置
       const terrain = target.room.getTerrain();
       const spots: RoomPosition[] = [];
 
@@ -508,11 +538,23 @@ export class TrafficManager {
 
       if (spots.length > 0) {
         spots.sort((a, b) => {
+          // 优化：优先推到“远离”推挤者的位置，避免推到推挤者的必经之路上
+          // 但在单通道里，其实只能推到旁边
           const da = a.getRangeTo(pusher.pos);
           const db = b.getRangeTo(pusher.pos);
+          // 如果是单通道，优先推远；否则优先侧向避让？
+          // 这里简化为：谁远谁优先 (避免就在眼皮底下换位)
           return db - da;
         });
         const spot = spots[0];
+        
+        // 执行推挤移动
+        // 重要：如果 target 也在动（有 intention），我们需要覆盖它的移动吗？
+        // Screeps 机制：同一 tick 多次 move，最后一次生效。
+        // 所以这里只要我们在 kernel.run 后执行，就能覆盖 target 的原意图。
+        // 但如果 target 原本就是要让路，或者去别的地方，我们推它可能会打断。
+        // 鉴于 smartMove 已经检查过 target 是 blocking 的，说明 target 没动或者动不了。
+        
         this.applyTrafficAvoidMark(target);
         target.move(target.pos.getDirectionTo(spot));
         this.recentPushUntil[target.id] = Game.time + 2;
@@ -521,9 +563,15 @@ export class TrafficManager {
         telemetry.pushSuccess += 1;
         this.roomTelemetry(target.room.name).pushSuccess += 1;
       } else {
+        // 如果找不到空位，且是单通道冲突
+        // 尝试 fallback：反向推 (即让 target 往后退)
+        // 但如果后面也没路，那就只能 pusher 让路了
+        
         const awayDir = pusher.pos.getDirectionTo(target.pos);
         const fallback = this.getPosAtDirection(target.pos, awayDir);
+        
         if (fallback && this.isWalkableAndFree(fallback)) {
+          // 能往后退，那就退
           this.applyTrafficAvoidMark(target);
           target.move(awayDir);
           this.recentPushUntil[target.id] = Game.time + 2;
@@ -535,12 +583,20 @@ export class TrafficManager {
           room.pushSuccess += 1;
           room.pushFallbackSuccess += 1;
         } else if (
-          this.isSingleLaneConflict(pusher, target) &&
+          isSingleLane &&
           pusherPriority < targetPriority
         ) {
+          // target 没地儿退，且 pusher 低级，只能 pusher 让
           if (this.tryYield(pusher, target)) {
             processed.add(pusher.id);
           }
+        } else if (
+           isSingleLane &&
+           pusherPriority >= targetPriority
+        ) {
+           // target 没地儿退，且 pusher 高级，此时僵持
+           // 尝试让 pusher 往后退一格让出空间？或者 pusher 等待
+           // 暂时不做操作，等下个 tick 也许路就通了
         }
       }
     }

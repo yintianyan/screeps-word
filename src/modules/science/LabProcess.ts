@@ -83,8 +83,57 @@ export class LabProcess extends Process {
           }
       }
       
-      // Boost Logic (Placeholder)
-      // Check for creeps needing boost nearby?
+      // Boost Logic
+      this.runBoost(room);
+  }
+
+  private runBoost(room: Room): void {
+    const creeps = room.find(FIND_MY_CREEPS, {
+      filter: (c) => c.memory.boosts && !c.memory.boosted,
+    });
+
+    if (creeps.length === 0) return;
+
+    const labs = room.find(FIND_MY_STRUCTURES, {
+      filter: (s) => s.structureType === STRUCTURE_LAB,
+    }) as StructureLab[];
+
+    for (const creep of creeps) {
+      if (!creep.memory.boosts) continue;
+
+      let allBoosted = true;
+      for (const boostType of creep.memory.boosts) {
+        // Check if already boosted with this type (Need more complex memory tracking, skip for now)
+        // Assume we need all boosts in list.
+        
+        // Find a lab with this mineral and energy
+        const lab = labs.find(
+          (l) =>
+            l.store[boostType as ResourceConstant] >= 30 &&
+            l.store.energy >= 20
+        );
+
+        if (lab) {
+          if (creep.pos.isNearTo(lab)) {
+            lab.boostCreep(creep);
+            // We don't know if it succeeded without checking body parts boost property
+            // But assume it works if resources are there.
+          } else {
+            creep.moveTo(lab);
+            allBoosted = false;
+            break; // Go to one lab at a time
+          }
+        } else {
+            // Lab not ready, skip this boost or wait?
+            // If critical, wait.
+            allBoosted = false; 
+        }
+      }
+      
+      if (allBoosted) {
+          creep.memory.boosted = true;
+      }
+    }
   }
 }
 

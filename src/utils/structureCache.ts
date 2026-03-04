@@ -19,6 +19,12 @@ export default class StructureCache {
     );
   }
 
+  static getAllStructures(room: Room): Structure[] {
+    return Cache.getTick(`sc:allStructures:${room.name}`, () =>
+      room.find(FIND_STRUCTURES),
+    );
+  }
+
   /**
    * 获取房间内我拥有的指定类型结构 (FIND_MY_STRUCTURES)
    */

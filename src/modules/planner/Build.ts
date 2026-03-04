@@ -1,7 +1,8 @@
 import { config } from "../../config";
 import type { LayoutName } from "./Layouts";
-import { plannedStructuresForRcl } from "./Layouts";
+import { getPlannedStructures } from "./Layouts";
 import { findCoreAnchor } from "./DistanceTransform";
+import StructureCache from "../../utils/structureCache";
 
 type Anchor = { x: number; y: number };
 type DynamicPlan = {
@@ -9,13 +10,37 @@ type DynamicPlan = {
   noBuild: Set<string>;
 };
 
+// 优先级定义 (数值越高越优先)
+const BUILD_PRIORITY: Record<string, number> = {
+  [STRUCTURE_SPAWN]: 100,
+  [STRUCTURE_EXTENSION]: 90,
+  [STRUCTURE_TOWER]: 80,
+  [STRUCTURE_LINK]: 70,
+  [STRUCTURE_LAB]: 60,
+  [STRUCTURE_TERMINAL]: 60,
+  [STRUCTURE_STORAGE]: 60,
+  [STRUCTURE_NUKER]: 50,
+  [STRUCTURE_OBSERVER]: 50,
+  [STRUCTURE_POWER_SPAWN]: 50,
+  [STRUCTURE_FACTORY]: 50,
+  [STRUCTURE_CONTAINER]: 40,
+  [STRUCTURE_EXTRACTOR]: 40,
+  [STRUCTURE_ROAD]: 20,
+  [STRUCTURE_RAMPART]: 10,
+  [STRUCTURE_WALL]: 10,
+};
+
+// 并发工地限制 (按阶段规划的核心：不要一次性铺太多)
+const MAX_CONSTRUCTION_SITES = 3;
+
 function isInsideRoom(x: number, y: number): boolean {
   return x >= 2 && x <= 47 && y >= 2 && y <= 47;
 }
 
 function getLayoutName(room: Room): LayoutName {
   const name = room.memory.planner?.layout;
-  if (name === "stamp" || name === "bunker" || name === "atlas") return name;
+  if (name === "stamp" || name === "bunker" || name === "atlas" || name === "auto")
+    return name;
   return config.LAYOUT.DEFAULT;
 }
 
@@ -32,15 +57,6 @@ function keyOf(x: number, y: number): string {
   return `${x}:${y}`;
 }
 
-function parseKey(key: string): { x: number; y: number } | null {
-  const parts = key.split(":");
-  if (parts.length !== 2) return null;
-  const x = Number(parts[0]);
-  const y = Number(parts[1]);
-  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
-  return { x, y };
-}
-
 function buildBaseMatrix(room: Room): CostMatrix {
   const matrix = new PathFinder.CostMatrix();
   const terrain = room.getTerrain();
@@ -51,7 +67,7 @@ function buildBaseMatrix(room: Room): CostMatrix {
       }
     }
   }
-  const structures = room.find(FIND_STRUCTURES);
+  const structures = StructureCache.getAllStructures(room);
   for (const s of structures) {
     if (
       s.structureType === STRUCTURE_ROAD ||
@@ -123,159 +139,46 @@ function canPlace(
   y: number,
   type: BuildableStructureConstant,
   noBuild: Set<string>,
+  structureMap: Map<string, StructureConstant[]>,
 ): boolean {
   if (!isInsideRoom(x, y)) return false;
+  
+  // 检查是否在保留区域 (除了路)
   if (type !== STRUCTURE_ROAD && noBuild.has(keyOf(x, y))) return false;
+  
+  // 检查地形
   const terrain = room.getTerrain();
   if (terrain.get(x, y) === TERRAIN_MASK_WALL) return false;
 
-  const pos = new RoomPosition(x, y, room.name);
-  const structures = pos.lookFor(LOOK_STRUCTURES);
-
-  // Allow roads on ramparts and ramparts on anything
+  // 检查现有建筑冲突
+  const existing = structureMap.get(keyOf(x, y)) || [];
+  
   if (type === STRUCTURE_RAMPART) {
-    if (structures.some((s) => s.structureType === STRUCTURE_WALL))
-      return false;
-    return true;
+    // Rampart 不能建在 Wall 上，其他都可以
+    return !existing.includes(STRUCTURE_WALL);
   }
+  
   if (type === STRUCTURE_ROAD) {
-    if (
-      structures.some(
-        (s) =>
-          s.structureType !== STRUCTURE_RAMPART &&
-          s.structureType !== STRUCTURE_ROAD,
-      )
-    )
-      return false;
-    // Roads can coexist with road (redundant) and rampart
+    // Road 不能建在非 Road/Rampart/Container 的建筑上 (通常)
+    // 但其实 Road 可以和大多数 walkable 建筑共存，除了 Wall/Spawn/Extension 等阻挡物
+    // 简单起见，如果已经有非路非 Rampart 的东西，且它是阻挡的，就不能建路 (虽然 creep 能走)
+    // 实际上 Screeps 允许 Road 建在任何地方，除了 Wall?
+    // 稳妥起见，如果已有 Road，返回 false (不需要再建)
+    if (existing.includes(STRUCTURE_ROAD)) return false;
+    if (existing.includes(STRUCTURE_WALL)) return false;
     return true;
   }
 
-  // For other structures, must be empty or road/rampart
-  if (structures.length > 0) {
-    // If there's a road/rampart, we can place some things on top?
-    // Generally no, unless it's a road site on a road.
-    // But here we check if we can place a NEW structure.
-    // If there is a road, we can place rampart.
-    // If there is a rampart, we can place anything.
-    if (structures.some((s) => s.structureType === STRUCTURE_ROAD))
-      return false;
-    const blocker = structures.find(
-      (s) =>
-        s.structureType !== STRUCTURE_RAMPART &&
-        s.structureType !== STRUCTURE_ROAD,
-    );
-    if (blocker) return false;
-  }
-
-  const sites = pos.lookFor(LOOK_CONSTRUCTION_SITES);
-  if (sites.length > 0) {
-    if (sites.every((s) => s.structureType === STRUCTURE_ROAD)) return true;
-    return false;
+  // 其他建筑 (Extension, Spawn, etc.)
+  if (existing.length > 0) {
+    // 如果只有 Road/Rampart，可以建
+    const blockers = existing.filter(t => t !== STRUCTURE_ROAD && t !== STRUCTURE_RAMPART);
+    if (blockers.length > 0) return false;
   }
 
   return true;
 }
 
-function placeOne(
-  room: Room,
-  type: BuildableStructureConstant,
-  x: number,
-  y: number,
-): boolean {
-  // Check if structure already exists
-  const pos = new RoomPosition(x, y, room.name);
-  const structures = pos.lookFor(LOOK_STRUCTURES);
-  if (structures.some((s) => s.structureType === type)) return false;
-
-  // Check if site exists
-  const sites = pos.lookFor(LOOK_CONSTRUCTION_SITES);
-  if (sites.some((s) => s.structureType === type)) return false;
-  if (sites.length > 0) {
-    if (
-      type !== STRUCTURE_ROAD &&
-      sites.every((s) => s.structureType === STRUCTURE_ROAD)
-    ) {
-      const creeps = room.find(FIND_MY_CREEPS);
-      for (const s of sites) {
-        if (
-          s.progress > 0 ||
-          creeps.some((c) => (c.memory as any).targetId === s.id)
-        ) {
-          return false;
-        }
-      }
-      for (const s of sites) s.remove();
-    } else {
-      return false;
-    }
-  }
-
-  const result = room.createConstructionSite(x, y, type);
-  return result === OK;
-}
-
-function placeDynamicRoads(
-  room: Room,
-  anchor: Anchor,
-  roads: Set<string>,
-  budget: number,
-): number {
-  if (budget <= 0 || roads.size === 0) return 0;
-  const ordered = [...roads]
-    .map((k) => parseKey(k))
-    .filter((p): p is { x: number; y: number } => p != null)
-    .sort(
-      (a, b) =>
-        Math.abs(a.x - anchor.x) +
-        Math.abs(a.y - anchor.y) -
-        (Math.abs(b.x - anchor.x) + Math.abs(b.y - anchor.y)),
-    );
-  let placed = 0;
-  for (const p of ordered) {
-    if (placed >= budget) break;
-    if (placeOne(room, STRUCTURE_ROAD, p.x, p.y)) placed++;
-  }
-  return placed;
-}
-
-function planRoad(
-  room: Room,
-  from: RoomPosition,
-  to: RoomPosition,
-  budget: number,
-): number {
-  if (budget <= 0) return 0;
-
-  const res = PathFinder.search(
-    from,
-    { pos: to, range: 1 },
-    { plainCost: 2, swampCost: 10, maxOps: 2000 },
-  );
-
-  let placed = 0;
-  for (const pos of res.path) {
-    if (placed >= budget) break;
-    // canPlace check logic for road is: terrain not wall, no other blocking structures
-    // placeOne handles existence check
-    if (placeOne(room, STRUCTURE_ROAD, pos.x, pos.y)) placed++;
-  }
-  return placed;
-}
-
-/**
- * 建筑规划执行器
- *
- * 负责在房间内实际放置工地 (ConstructionSite)。
- *
- * 核心逻辑：
- * 1. 确定房间布局锚点 (Anchor)。
- * 2. 获取当前 RCL 允许的建筑列表。
- * 3. 检查现有建筑和工地。
- * 4. 按照布局模板放置新的工地。
- * 5. 动态规划道路 (连接 Hub 到 Source/Controller)。
- * 6. 自动清理阻挡发展的旧道路。
- */
 export class Build {
   public static run(room: Room): void {
     if (!room.controller?.my) return;
@@ -284,90 +187,124 @@ export class Build {
     const anchor = getAnchor(room);
     if (!anchor) return;
 
+    // 初始化内存
     if (!room.memory.planner)
       room.memory.planner = { layout: getLayoutName(room) };
     if (!room.memory.planner.anchor) room.memory.planner.anchor = anchor;
 
     const rcl = room.controller.level;
     const layoutName = getLayoutName(room);
+    
+    // 1. 获取动态规划数据 (路网与保留区)
     const dynamicPlan = computeDynamicPlan(room, anchor);
 
-    const allSites = room.find(FIND_MY_CONSTRUCTION_SITES);
-    const roadSites = allSites.filter(
-      (s) => s.structureType === STRUCTURE_ROAD,
+    // 2. 收集所有已存在的建筑和工地，构建快速查询表
+    const structureMap = new Map<string, StructureConstant[]>();
+    StructureCache.getAllStructures(room).forEach((s) => {
+      const k = keyOf(s.pos.x, s.pos.y);
+      const list = structureMap.get(k) || [];
+      list.push(s.structureType);
+      structureMap.set(k, list);
+    });
+
+    const siteMap = new Map<string, StructureConstant[]>();
+    const mySites = StructureCache.getConstructionSites(room).filter(
+      (s) => s.my,
     );
-    const nonRoadSites = allSites.length - roadSites.length;
-    if (nonRoadSites >= 10) return;
+    mySites.forEach((s) => {
+      const k = keyOf(s.pos.x, s.pos.y);
+      const list = siteMap.get(k) || [];
+      list.push(s.structureType);
+      siteMap.set(k, list);
+    });
 
-    let placed = 0;
-    const maxPerTick = 3;
+    // 3. 统计当前活跃工地数量
+    let activeSitesCount = mySites.length;
+    if (activeSitesCount >= MAX_CONSTRUCTION_SITES) return; // 达到并发限制，跳过规划
 
-    // 1. Core Layout Structures
-    const planned = plannedStructuresForRcl(layoutName, rcl);
+    // 4. 生成所有候选任务
+    type BuildTask = {
+      type: BuildableStructureConstant;
+      x: number;
+      y: number;
+      priority: number;
+      dist: number;
+    };
+    const candidates: BuildTask[] = [];
 
-    const extBuilt = room.find(FIND_MY_STRUCTURES, {
-      filter: (s) => s.structureType === STRUCTURE_EXTENSION,
-    }).length;
-    const extDesired = CONTROLLER_STRUCTURES[STRUCTURE_EXTENSION][rcl] ?? 0;
-    const towerBuilt = room.find(FIND_MY_STRUCTURES, {
-      filter: (s) => s.structureType === STRUCTURE_TOWER,
-    }).length;
-    const towerDesired = CONTROLLER_STRUCTURES[STRUCTURE_TOWER][rcl] ?? 0;
-    const allowRoads = extBuilt >= extDesired && towerBuilt >= towerDesired;
-
-    if (!allowRoads && allSites.length >= 90 && roadSites.length > 0) {
-      const toRemove = Math.min(roadSites.length, allSites.length - 80);
-      const creeps = room.find(FIND_MY_CREEPS);
-      let removed = 0;
-      for (let i = 0; i < roadSites.length && removed < toRemove; i++) {
-        const s = roadSites[i];
-        if (
-          s.progress > 0 ||
-          creeps.some((c) => (c.memory as any).targetId === s.id)
-        )
-          continue;
-        s.remove();
-        removed++;
-      }
-    }
-
+    // 4.1 静态布局任务
+    const planned = getPlannedStructures(room, rcl, layoutName, anchor);
+    
+    // [Fix] 过滤掉已经存在的建筑 (虽然 placeOne 里也会查，但在这里过滤可以减少无效任务进入队列，提高效率)
+    // 同时，确保我们不会因为 limit 限制而漏掉低级建筑的修补 (例如 RCL5 时，Extension 被拆了，需要重建)
+    // plannedStructuresForRcl 返回的是当前 RCL 应有的所有建筑列表，所以只要遍历这个列表，
+    // 缺啥补啥，就能保证建筑被“规划完”。
+    
     for (const p of planned) {
-      if (placed >= maxPerTick) break;
-      if (p.type === STRUCTURE_ROAD && !allowRoads) continue;
       const x = anchor.x + p.dx;
       const y = anchor.y + p.dy;
-
-      if (canPlace(room, x, y, p.type, dynamicPlan.noBuild)) {
-        if (placeOne(room, p.type, x, y)) placed++;
-      }
+      
+      // 快速检查：如果该位置已有同类型建筑，则无需加入候选队列
+      const k = keyOf(x, y);
+      const existing = structureMap.get(k);
+      if (existing && existing.includes(p.type)) continue;
+      
+      candidates.push({
+        type: p.type,
+        x,
+        y,
+        priority: BUILD_PRIORITY[p.type] ?? 0,
+        dist: Math.abs(p.dx) + Math.abs(p.dy) // 曼哈顿距离作为次要排序
+      });
     }
 
-    // 2. Roads to Sources / Controller (if budget left)
-    if (allowRoads && rcl >= 3 && placed < maxPerTick && nonRoadSites < 8) {
-      const hub = new RoomPosition(anchor.x, anchor.y, room.name);
-      const roadBudget = maxPerTick - placed;
-      let roadPlaced = 0;
+    // 4.2 动态道路任务
+    for (const roadKey of dynamicPlan.roads) {
+      const parts = roadKey.split(":");
+      const x = Number(parts[0]);
+      const y = Number(parts[1]);
+      candidates.push({
+        type: STRUCTURE_ROAD,
+        x,
+        y,
+        priority: BUILD_PRIORITY[STRUCTURE_ROAD] ?? 0,
+        dist: Math.abs(x - anchor.x) + Math.abs(y - anchor.y)
+      });
+    }
 
-      roadPlaced += placeDynamicRoads(
-        room,
-        anchor,
-        dynamicPlan.roads,
-        roadBudget - roadPlaced,
-      );
+    // 5. 排序候选任务 (优先级降序 -> 距离升序)
+    candidates.sort((a, b) => {
+      if (a.priority !== b.priority) return b.priority - a.priority;
+      return a.dist - b.dist;
+    });
 
-      if (room.controller && roadPlaced < roadBudget) {
-        roadPlaced += planRoad(
-          room,
-          hub,
-          room.controller.pos,
-          roadBudget - roadPlaced,
-        );
+    // 6. 遍历并发布任务 (直到填满并发额度)
+    for (const task of candidates) {
+      if (activeSitesCount >= MAX_CONSTRUCTION_SITES) break;
+
+      const k = keyOf(task.x, task.y);
+      
+      // 检查是否已建
+      const existingStructs = structureMap.get(k);
+      if (existingStructs && existingStructs.includes(task.type)) continue;
+
+      // 检查是否已有工地
+      const existingSites = siteMap.get(k);
+      if (existingSites && existingSites.includes(task.type)) {
+        // 已经是活跃工地，跳过
+        continue; 
       }
 
-      const sources = room.find(FIND_SOURCES);
-      for (const source of sources) {
-        if (roadPlaced >= roadBudget) break;
-        roadPlaced += planRoad(room, hub, source.pos, roadBudget - roadPlaced);
+      // 检查是否可建
+      if (canPlace(room, task.x, task.y, task.type, dynamicPlan.noBuild, structureMap)) {
+        const result = room.createConstructionSite(task.x, task.y, task.type);
+        if (result === OK) {
+          activeSitesCount++;
+          // 更新缓存，防止同 tick 重复发布 (虽然 activeSitesCount 限制了)
+          const list = siteMap.get(k) || [];
+          list.push(task.type);
+          siteMap.set(k, list);
+        }
       }
     }
   }

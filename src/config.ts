@@ -23,7 +23,8 @@ export const config = {
   POPULATION: {
     METRICS_ALPHA: 0.05, // 指标平滑系数
     WORKER: {
-      MIN: 2, // 最少 Worker 数量
+      MIN: 2, // 绝对最小值 (除非 RCL8 特判)
+      MIN_DYNAMIC: (rcl: number) => (rcl === 8 ? 1 : 2), // 动态最小值
       RCL_TARGETS: [0, 6, 8, 8, 6, 6, 4, 4, 4], // 各 RCL 等级下的基础 Worker 目标
       IDLE_HIGH: 0.3, // 闲置率高阈值 (触发减少人口)
       IDLE_LOW: 0.05, // 闲置率低阈值 (触发增加人口)
@@ -92,7 +93,7 @@ export const config = {
     MODE_SWITCH_MIN_TICKS: 50, // 模式切换最小间隔
   },
   LAYOUT: {
-    DEFAULT: "atlas" as "stamp" | "bunker" | "atlas", // 默认布局
+    DEFAULT: "auto" as "stamp" | "bunker" | "atlas" | "auto", // 默认布局
     DYNAMIC_INTERVAL: 50,
   },
   BODIES: {

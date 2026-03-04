@@ -163,7 +163,9 @@ export function findCoreAnchor(room: Room, ttl = 2000): Pos | null {
       if (terrain.get(x, y) === TERRAIN_MASK_WALL) continue;
       const dw = wall[idx(x, y)];
       const de = exit[idx(x, y)];
-      if (dw < 2 || de < 3) continue;
+      // Atlas core radius is about 5-6. 
+      // Ensure anchor is at least 5 tiles away from walls to fit the core.
+      if (dw < 6 || de < 4) continue;
 
       const score = scoreAnchor(room, x, y, wall, exit);
       if (score > bestScore) {

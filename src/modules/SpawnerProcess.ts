@@ -219,7 +219,7 @@ function desiredWorkerCount(room: Room): number {
     const { idleRate } = room.memory.metrics;
     if (idleRate > config.POPULATION.WORKER.IDLE_HIGH) {
       target = Math.max(
-        config.POPULATION.WORKER.MIN,
+        config.POPULATION.WORKER.MIN_DYNAMIC(rcl),
         target + config.POPULATION.WORKER.DELTA_IDLE,
       );
     } else if (
@@ -229,8 +229,21 @@ function desiredWorkerCount(room: Room): number {
       target += config.POPULATION.WORKER.DELTA_BUSY;
     }
   }
+  
+  // RCL 8 优化：如果只有少量工地且防御塔能量充足，减少 Worker 数量
+  // RCL 8 时，如果没有工地，Worker 几乎只做维修，2 个可能都嫌多，除非有大修任务
+  if (rcl === 8 && sites === 0) {
+      const storageEnergy = room.storage?.store.getUsedCapacity(RESOURCE_ENERGY) ?? 0;
+      // 能量极度富裕时可以维持 2 个刷墙/修路
+      // 否则减到 1 个做基本维护
+      if (storageEnergy < 300000) {
+          target = 1;
+      } else {
+          target = 2;
+      }
+  }
 
-  return Math.max(config.POPULATION.WORKER.MIN, target);
+  return Math.max(config.POPULATION.WORKER.MIN_DYNAMIC(rcl), target);
 }
 
 function shouldSpawnDefender(room: Room): boolean {
@@ -330,6 +343,19 @@ function getSpawnEnergyBudget(room: Room, isCritical: boolean): number {
  */
 export class SpawnerProcess extends Process {
   public run(): void {
+    // 处理战争模块的孵化请求
+    if (Memory.war?.spawnRequests) {
+      for (const req of Memory.war.spawnRequests) {
+        if (req.status === "pending") {
+          const room = Game.rooms[req.roomName];
+          if (room && room.controller?.my && room.energyCapacityAvailable >= bodyCost(req.body)) {
+            this.requestSpawn(req.roomName, req.role, req.body, req.priority, req.memory);
+            req.status = "processing";
+          }
+        }
+      }
+    }
+
     const children = this.kernel.getChildren(this.pid);
     const activeJobs: ActiveJob[] = children.map((pid) => {
       const mem = this.kernel.getProcessMemory(pid);
@@ -467,7 +493,7 @@ export class SpawnerProcess extends Process {
       if (
         mode === "recover" &&
         rcl >= 3 &&
-        workerCount >= config.POPULATION.WORKER.MIN
+        workerCount >= config.POPULATION.WORKER.MIN_DYNAMIC(rcl)
       ) {
         const sources = StructureCache.getSources(room);
         if (sources.length > 0) {
@@ -530,8 +556,8 @@ export class SpawnerProcess extends Process {
           }
         }
       }
-
-      if (rcl >= 3 && workerCount >= config.POPULATION.WORKER.MIN) {
+      
+      if (rcl >= 3 && workerCount >= config.POPULATION.WORKER.MIN_DYNAMIC(rcl)) {
         const sources = StructureCache.getSources(room);
         const planned = room.memory.mining ?? {};
         const plannedSources = sources.filter(

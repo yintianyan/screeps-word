@@ -9,13 +9,14 @@ import { HarvestTask } from "../tasks/HarvestTask";
 import { TransferTask } from "../tasks/TransferTask";
 import { UpgradeTask } from "../tasks/UpgradeTask";
 import { BuildTask } from "../tasks/BuildTask";
+import { RepairTask } from "../tasks/RepairTask";
 import { WithdrawTask } from "../tasks/WithdrawTask";
 import { PickupTask } from "../tasks/PickupTask";
 import { Debug } from "../core/Debug";
 
 type SupportedTask = Extract<
   TaskType,
-  "pickup" | "harvest" | "withdraw" | "transfer" | "upgrade" | "build"
+  "pickup" | "harvest" | "withdraw" | "transfer" | "upgrade" | "build" | "repair"
 >;
 type AssignedTask = {
   type: SupportedTask;
@@ -298,6 +299,83 @@ function pickEnergyTargetId(creep: Creep): string | null {
     }
   }
   if (bestTower && tryReserve(bestTower.id, creep.name, 1)) return bestTower.id;
+
+  return null;
+}
+
+function pickRepairTargetId(creep: Creep, priority: "critical" | "maintenance"): string | null {
+  const roads = StructureCache.getStructures(
+    creep.room,
+    STRUCTURE_ROAD,
+  ) as StructureRoad[];
+  const containers = StructureCache.getStructures(
+    creep.room,
+    STRUCTURE_CONTAINER,
+  ) as StructureContainer[];
+  const ramparts = StructureCache.getMyStructures(
+    creep.room,
+    STRUCTURE_RAMPART,
+  ) as StructureRampart[];
+
+  if (priority === "critical") {
+    // Road < 20%
+    const criticalRoad = roads.find((r) => r.hits < r.hitsMax * 0.2);
+    if (criticalRoad) return criticalRoad.id;
+
+    // Container < 50%
+    const criticalContainer = containers.find((c) => c.hits < c.hitsMax * 0.5);
+    if (criticalContainer) return criticalContainer.id;
+
+    // Rampart < 5k (Emergency defense)
+    const criticalRampart = ramparts.find((r) => r.hits < 5000);
+    if (criticalRampart) return criticalRampart.id;
+  } else {
+    // Maintenance
+    // Road < 80%
+    const damagedRoad = roads.find((r) => r.hits < r.hitsMax * 0.8);
+    if (damagedRoad) return damagedRoad.id;
+
+    // Container < 90%
+    const damagedContainer = containers.find((c) => c.hits < c.hitsMax * 0.9);
+    if (damagedContainer) return damagedContainer.id;
+
+    // Fortify
+    const rcl = creep.room.controller?.level ?? 0;
+    if (rcl >= 4) {
+      const storageEnergy =
+        creep.room.storage?.store.getUsedCapacity(RESOURCE_ENERGY) ?? 0;
+      // Only fortify if storage has energy buffer
+      if (storageEnergy > config.POPULATION.STORAGE.WORKER_WITHDRAW_MIN) {
+        // Target hits based on RCL and Storage level
+        let targetHits = 50000;
+        if (rcl >= 6) targetHits = 500000;
+        if (rcl === 8) {
+           if (storageEnergy > 500000) targetHits = 300000000; // Max walls
+           else if (storageEnergy > 100000) targetHits = 3000000;
+           else targetHits = 1000000;
+        }
+
+        const walls = StructureCache.getStructures(
+          creep.room,
+          STRUCTURE_WALL,
+        ) as StructureWall[];
+        const fortifications = [...ramparts, ...walls];
+
+        let weakest: Structure | null = null;
+        let minHits = targetHits;
+
+        // Find weakest below target
+        for (const s of fortifications) {
+          if (s.hits < minHits) {
+            minHits = s.hits;
+            weakest = s;
+          }
+        }
+
+        if (weakest) return weakest.id;
+      }
+    }
+  }
 
   return null;
 }
@@ -607,7 +685,7 @@ function assignUpgraderTask(
 function assignTask(
   creep: Creep,
   assigned: Record<string, number>,
-  counts: { upgrade: number; build: number; transfer: number },
+  counts: { upgrade: number; build: number; transfer: number; repair: number },
   hasSites: boolean,
   logisticsSupport: boolean,
 ): AssignedTask | null {
@@ -624,6 +702,11 @@ function assignTask(
     ticksToDowngrade < config.CONTROLLER.DOWNGRADE_CRITICAL
   ) {
     return { type: "upgrade" };
+  }
+
+  if (used > 0) {
+    const repairId = pickRepairTargetId(creep, "critical");
+    if (repairId) return { type: "repair", targetId: repairId };
   }
 
   if (!creep.memory.working) {
@@ -673,8 +756,7 @@ function assignTask(
 
   if (needsRefill && !logisticsSupport) {
     const targetId = pickEnergyTargetId(creep);
-    if (!targetId) return { type: "upgrade" };
-    return { type: "transfer", targetId };
+    if (targetId) return { type: "transfer", targetId };
   }
 
   if (
@@ -689,6 +771,15 @@ function assignTask(
     assigned[siteId] = (assigned[siteId] ?? 0) + 1;
     return { type: "build", targetId: siteId };
   }
+
+  const repairId = pickRepairTargetId(creep, "maintenance");
+  if (repairId) return { type: "repair", targetId: repairId };
+
+  const rcl = creep.room.controller?.level ?? 0;
+  if (rcl === 8 && (ticksToDowngrade ?? 0) > 50000) {
+    return null;
+  }
+
   return { type: "upgrade" };
 }
 
@@ -737,6 +828,11 @@ function canRunStickyTask(creep: Creep, task: WorkerStickyTask): boolean {
     const site = Game.getObjectById(task.targetId as Id<ConstructionSite>);
     return site instanceof ConstructionSite;
   }
+  if (task.type === "repair") {
+    if (usedEnergy <= 0 || !task.targetId) return false;
+    const target = Game.getObjectById(task.targetId as Id<Structure>);
+    return target instanceof Structure && target.hits < target.hitsMax;
+  }
   if (task.type === "harvest") {
     if (freeEnergy <= 0 || !task.targetId) return false;
     const source = Game.getObjectById(task.targetId as Id<Source>);
@@ -784,7 +880,7 @@ export class RoomLogisticsProcess extends Process {
   public run(): void {
     for (const room of getMyRooms()) {
       const assigned: Record<string, number> = {};
-      const counts = { upgrade: 0, build: 0, transfer: 0 };
+      const counts = { upgrade: 0, build: 0, transfer: 0, repair: 0 };
       const hasSites = StructureCache.getConstructionSites(room).some(
         (s) => s.my,
       );
@@ -814,6 +910,7 @@ export class RoomLogisticsProcess extends Process {
           if (stickyTask.type === "upgrade") counts.upgrade++;
           if (stickyTask.type === "build") counts.build++;
           if (stickyTask.type === "transfer") counts.transfer++;
+          if (stickyTask.type === "repair") counts.repair++;
           continue;
         }
         if (stickyTask) clearWorkerStickyTask(creep);
@@ -831,6 +928,7 @@ export class RoomLogisticsProcess extends Process {
           if (newTask.type === "upgrade") counts.upgrade++;
           if (newTask.type === "build") counts.build++;
           if (newTask.type === "transfer") counts.transfer++;
+          if (newTask.type === "repair") counts.repair++;
         } else {
           clearWorkerStickyTask(creep);
           idleWorkerCount++;
@@ -859,19 +957,23 @@ export class RoomLogisticsProcess extends Process {
       Debug.gauge(`room.${room.name}.workers.build`, counts.build);
       Debug.gauge(`room.${room.name}.workers.upgrade`, counts.upgrade);
       Debug.gauge(`room.${room.name}.workers.transfer`, counts.transfer);
+      Debug.gauge(`room.${room.name}.workers.repair`, counts.repair);
       Debug.gauge(`room.${room.name}.distributors.total`, distributorCount);
       Debug.gauge(`room.${room.name}.haulers.total`, haulerCount);
       let runningBuild = 0;
       let runningUpgrade = 0;
+      let runningRepair = 0;
       for (const c of workers) {
         const pid = c.memory.taskId;
         if (!pid) continue;
         const t = this.kernel.getProcessType(pid);
         if (t === "BuildTask") runningBuild++;
         if (t === "UpgradeTask") runningUpgrade++;
+        if (t === "RepairTask") runningRepair++;
       }
       Debug.gauge(`room.${room.name}.workers.runningBuild`, runningBuild);
       Debug.gauge(`room.${room.name}.workers.runningUpgrade`, runningUpgrade);
+      Debug.gauge(`room.${room.name}.workers.runningRepair`, runningRepair);
 
       const upgraders = StructureCache.getCreeps(room, "upgrader");
       let upgraderAssigned = 0;
@@ -915,6 +1017,9 @@ export class RoomLogisticsProcess extends Process {
         break;
       case "build":
         process = new BuildTask(pid, this.pid, priority);
+        break;
+      case "repair":
+        process = new RepairTask(pid, this.pid, priority);
         break;
       case "withdraw":
         process = new WithdrawTask(pid, this.pid, priority);

@@ -13,6 +13,7 @@ import { CreepRecycleProcess } from "./modules/CreepRecycleProcess";
 import { TerminalProcess } from "./modules/TerminalProcess";
 import { LabProcess } from "./modules/science/LabProcess";
 import { PowerProcess } from "./modules/science/PowerProcess";
+import { ScoutProcess } from "./modules/ScoutProcess";
 import { ErrorMapper } from "./core/ErrorMapper";
 import {
   recordCpuStats,
@@ -133,6 +134,10 @@ export const loop = ErrorMapper.wrapLoop(() => {
 
       if (!Memory.kernel.processTable["power"]) {
         kernel.addProcess(new PowerProcess("power", "init", 20));
+      }
+
+      if (!Memory.kernel.processTable["scout"]) {
+        kernel.addProcess(new ScoutProcess("scout", "init", 35));
       }
     }
 
