@@ -59,6 +59,75 @@ function appendJsonl(filePath, obj) {
   fs.appendFileSync(filePath, `${JSON.stringify(obj)}\n`, "utf8");
 }
 
+function asNumber(v, fallback = 0) {
+  return typeof v === "number" && Number.isFinite(v) ? v : fallback;
+}
+
+function toTrafficSummary(traffic) {
+  if (!traffic || typeof traffic !== "object") return null;
+  const roomsObj =
+    traffic.rooms && typeof traffic.rooms === "object" ? traffic.rooms : {};
+  const roomNames = Object.keys(roomsObj);
+  const rooms = [];
+  for (const roomName of roomNames) {
+    const raw = roomsObj[roomName] || {};
+    const room = {
+      roomName,
+      stuckSamples: asNumber(raw.stuckSamples),
+      severeStuckSamples: asNumber(raw.severeStuckSamples),
+      oscillateSamples: asNumber(raw.oscillateSamples),
+      noPathCount: asNumber(raw.noPathCount),
+      pushRequests: asNumber(raw.pushRequests),
+      pushSuccess: asNumber(raw.pushSuccess),
+      pushFallbackSuccess: asNumber(raw.pushFallbackSuccess),
+      yieldMoves: asNumber(raw.yieldMoves),
+      maxStuck: asNumber(raw.maxStuck),
+      maxOscillate: asNumber(raw.maxOscillate),
+      lastStuckPos:
+        typeof raw.lastStuckPos === "string" ? raw.lastStuckPos : null,
+      lastStuckCreep:
+        typeof raw.lastStuckCreep === "string" ? raw.lastStuckCreep : null,
+      lastTargetPos:
+        typeof raw.lastTargetPos === "string" ? raw.lastTargetPos : null,
+    };
+    rooms.push(room);
+  }
+  rooms.sort((a, b) => {
+    const scoreA = a.severeStuckSamples * 10 + a.noPathCount * 5 + a.maxStuck;
+    const scoreB = b.severeStuckSamples * 10 + b.noPathCount * 5 + b.maxStuck;
+    return scoreB - scoreA;
+  });
+  const topRooms = rooms.slice(0, 3);
+  const stuckHotspots = topRooms
+    .filter(
+      (r) => r.maxStuck >= 5 || r.severeStuckSamples > 0 || r.noPathCount > 0,
+    )
+    .map((r) => ({
+      roomName: r.roomName,
+      maxStuck: r.maxStuck,
+      severeStuckSamples: r.severeStuckSamples,
+      noPathCount: r.noPathCount,
+      lastStuckPos: r.lastStuckPos,
+      lastStuckCreep: r.lastStuckCreep,
+      lastTargetPos: r.lastTargetPos,
+    }));
+  return {
+    time: asNumber(traffic.time),
+    moveSamples: asNumber(traffic.moveSamples),
+    stuckSamples: asNumber(traffic.stuckSamples),
+    severeStuckSamples: asNumber(traffic.severeStuckSamples),
+    oscillateSamples: asNumber(traffic.oscillateSamples),
+    noPathCount: asNumber(traffic.noPathCount),
+    pushRequests: asNumber(traffic.pushRequests),
+    pushSuccess: asNumber(traffic.pushSuccess),
+    pushFallbackSuccess: asNumber(traffic.pushFallbackSuccess),
+    yieldMoves: asNumber(traffic.yieldMoves),
+    roomCount: rooms.length,
+    topRooms,
+    stuckHotspots,
+  };
+}
+
 function todayStr() {
   const d = new Date();
   const y = String(d.getFullYear());
@@ -131,6 +200,28 @@ function getDirectStatsHeaders() {
       : null);
 
   return key ? { "x-stats-key": key } : {};
+}
+
+function parseMaybeJson(value) {
+  if (typeof value !== "string") return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
+}
+
+function unwrapStatsPayload(payload) {
+  let value = parseMaybeJson(payload);
+  if (!value || typeof value !== "object") return value;
+  if ("stats" in value) value = parseMaybeJson(value.stats);
+  if (value && typeof value === "object" && "data" in value) {
+    value = parseMaybeJson(value.data);
+  }
+  if (value && typeof value === "object" && "stats" in value) {
+    value = parseMaybeJson(value.stats);
+  }
+  return value;
 }
 
 function getAuthHeaderCandidates(token, tokenTypeHint) {
@@ -250,7 +341,8 @@ async function getStats(baseUrl, tokenInfo) {
       const keys = Object.keys(headers).sort().join(",");
       process.stderr.write(`[collector] DIRECT ${url} headers=${keys}\n`);
     }
-    return await requestJson(url, { method: "GET", headers });
+    const payload = await requestJson(url, { method: "GET", headers });
+    return unwrapStatsPayload(payload);
   }
 
   const cookie = getCookieHeader();
@@ -275,15 +367,8 @@ async function getStats(baseUrl, tokenInfo) {
             process.stderr.write(`[collector] GET ${urlGet} headers=${keys}\n`);
           }
           const res = await requestJson(urlGet, { method: "GET", headers });
-          const data = res?.data;
-          if (typeof data === "string") {
-            try {
-              return JSON.parse(data);
-            } catch {
-              return null;
-            }
-          }
-          return data ?? null;
+          const stats = unwrapStatsPayload(res?.data ?? res);
+          return stats ?? null;
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
           if (msg.includes("HTTP 401") || msg.includes("HTTP 403")) continue;
@@ -303,15 +388,8 @@ async function getStats(baseUrl, tokenInfo) {
                 headers,
                 body: shard ? { path: "stats", shard } : { path: "stats" },
               });
-              const data = res?.data;
-              if (typeof data === "string") {
-                try {
-                  return JSON.parse(data);
-                } catch {
-                  return null;
-                }
-              }
-              return data ?? null;
+              const stats = unwrapStatsPayload(res?.data ?? res);
+              return stats ?? null;
             } catch (e2) {
               const msg2 = e2 instanceof Error ? e2.message : String(e2);
               if (msg2.includes("HTTP 401") || msg2.includes("HTTP 403"))
@@ -353,13 +431,31 @@ async function main() {
       if (!stats) throw new Error("No stats returned");
 
       const time = typeof stats.time === "number" ? stats.time : null;
+      const traffic = toTrafficSummary(stats.traffic);
       appendJsonl(outFile, {
         kind: "stats",
         at: startedAt,
         time,
         cpu: stats.cpu,
         kernelTop: stats.debug?.kernelTop,
+        traffic,
       });
+      if (traffic) {
+        appendJsonl(outFile, {
+          kind: "traffic",
+          at: startedAt,
+          time,
+          ...traffic,
+        });
+      }
+      if (traffic && traffic.stuckHotspots.length > 0) {
+        appendJsonl(outFile, {
+          kind: "stuck_diag",
+          at: startedAt,
+          time,
+          hotspots: traffic.stuckHotspots,
+        });
+      }
 
       const ticks = Array.isArray(stats.debug?.ticks) ? stats.debug.ticks : [];
       const lastTick = ticks.length > 0 ? ticks[ticks.length - 1] : null;

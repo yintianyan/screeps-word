@@ -17,8 +17,7 @@ export function runUpgrade(creep: Creep): TaskRunResult {
   if (result === OK) return { status: "running" };
   if (result === ERR_NOT_IN_RANGE) {
     const moveResult = smartMove(creep, controller, { reusePath: 10, range: 3 });
-    if (moveResult === ERR_NO_PATH)
-      return { status: "failed", reason: "pathBlocked" };
+    if (moveResult === ERR_NO_PATH) return { status: "running" };
     return { status: "running" };
   }
   if (result === ERR_NOT_ENOUGH_RESOURCES) return { status: "completed" };

@@ -20,8 +20,7 @@ export function runHarvest(creep: Creep, targetId?: string): TaskRunResult {
 
   if (result === ERR_NOT_IN_RANGE) {
     const moveResult = smartMove(creep, source, { range: 1, reusePath: 10 });
-    if (moveResult === ERR_NO_PATH)
-      return { status: "failed", reason: "pathBlocked" };
+    if (moveResult === ERR_NO_PATH) return { status: "running" };
     return { status: "running" };
   }
 

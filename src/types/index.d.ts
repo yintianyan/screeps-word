@@ -12,7 +12,7 @@ declare global {
     _move?: unknown;
 
     sourceId?: string;
-    sourceType?: 'storage' | 'link' | 'container' | 'source';
+    sourceType?: "storage" | "link" | "container" | "source";
     hauling?: boolean;
     fillCount?: number;
     idleTicks?: number;
@@ -26,6 +26,12 @@ declare global {
     targetRoom?: string;
     homeRoom?: string;
     _moveRequest?: unknown;
+    workerStickyTask?: {
+      type: "pickup" | "harvest" | "withdraw" | "transfer" | "upgrade" | "build";
+      targetId?: string;
+      resourceType?: ResourceConstant;
+      until: number;
+    };
   }
 
   interface RoomStats {
@@ -72,6 +78,36 @@ declare global {
     lastFlush?: number;
   }
 
+  interface TrafficRoomStats {
+    stuckSamples: number;
+    severeStuckSamples: number;
+    oscillateSamples: number;
+    noPathCount: number;
+    pushRequests: number;
+    pushSuccess: number;
+    pushFallbackSuccess: number;
+    yieldMoves: number;
+    maxStuck: number;
+    maxOscillate: number;
+    lastStuckPos?: string;
+    lastStuckCreep?: string;
+    lastTargetPos?: string;
+  }
+
+  interface TrafficStatsMemory {
+    time: number;
+    moveSamples: number;
+    stuckSamples: number;
+    severeStuckSamples: number;
+    oscillateSamples: number;
+    noPathCount: number;
+    pushRequests: number;
+    pushSuccess: number;
+    pushFallbackSuccess: number;
+    yieldMoves: number;
+    rooms: Record<string, TrafficRoomStats>;
+  }
+
   interface StatsMemory {
     rooms: Record<
       string,
@@ -87,6 +123,7 @@ declare global {
     };
     time: number;
     debug?: DebugStatsMemory;
+    traffic?: TrafficStatsMemory;
   }
 
   interface Memory {

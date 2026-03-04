@@ -73,9 +73,37 @@ node tools/private-stats/collector.mjs
 
 - 文件：`tools/private-stats/out/YYYY-MM-DD.jsonl`
 - 记录类型：
-  - `kind=stats`：聚合指标快照（cpu、kernelTop 等）
+  - `kind=stats`：聚合指标快照（cpu、kernelTop、traffic 概览）
+  - `kind=traffic`：交通与卡住诊断聚合（stuck/noPath/push/yield、topRooms）
+  - `kind=stuck_diag`：卡住热点快照（仅在存在热点时输出）
   - `kind=event`：调试事件（`stats.debug.events` 的增量）
   - `kind=error`：采集错误（包含鉴权失败/网络异常等）
+
+## 自动分析
+
+按最新 jsonl 自动统计：
+
+- 最常卡住坐标
+- 最常卡住 creep
+- 最常卡住房间
+- 孵化卡死窗口（长期无 worker/无 creep）
+
+```bash
+node tools/private-stats/analyze.mjs
+```
+
+指定输入文件：
+
+```bash
+node tools/private-stats/analyze.mjs tools/private-stats/out/2026-03-04.jsonl
+```
+
+可选参数：
+
+- `--top 10`：每类 Top N（默认 10）
+- `--min-stall 80`：最小卡死窗口 tick（默认 80）
+- `--max-gap 120`：窗口内样本最大断点 tick（默认 120）
+- `--json tools/private-stats/out/analysis.json`：写 JSON 报告
 
 ## 游戏内开关
 

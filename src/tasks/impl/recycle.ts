@@ -16,8 +16,7 @@ export function runRecycle(creep: Creep, targetId?: string): TaskRunResult {
   if (result === OK) return { status: "completed" };
   if (result === ERR_NOT_IN_RANGE) {
     const moveResult = smartMove(creep, spawn, { reusePath: 10, range: 1 });
-    if (moveResult === ERR_NO_PATH)
-      return { status: "failed", reason: "pathBlocked" };
+    if (moveResult === ERR_NO_PATH) return { status: "running" };
     return { status: "running" };
   }
   if (result === ERR_BUSY) return { status: "running" };

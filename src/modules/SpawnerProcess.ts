@@ -295,6 +295,8 @@ interface ActiveJob {
   role: string;
   room: string;
   targetRoom?: string;
+  createdAt?: number;
+  bodyCost?: number;
 }
 
 function getSpawnEnergyBudget(room: Room, isCritical: boolean): number {
@@ -331,11 +333,20 @@ export class SpawnerProcess extends Process {
     const children = this.kernel.getChildren(this.pid);
     const activeJobs: ActiveJob[] = children.map((pid) => {
       const mem = this.kernel.getProcessMemory(pid);
+      const bodyParts = Array.isArray(mem.body)
+        ? (mem.body.filter((part): part is BodyPartConstant =>
+            typeof part === "string" &&
+            Object.prototype.hasOwnProperty.call(BODYPART_COST, part),
+          ) as BodyPartConstant[])
+        : [];
+      const createdAt = typeof mem.createdAt === "number" ? mem.createdAt : undefined;
       return {
         pid,
         role: mem.role as string,
         room: mem.roomName as string,
         targetRoom: getStringProp(mem.memory as unknown, "targetRoom"),
+        createdAt,
+        bodyCost: bodyParts.length > 0 ? bodyCost(bodyParts) : undefined,
       };
     });
 
@@ -344,12 +355,32 @@ export class SpawnerProcess extends Process {
       if (!room.controller?.my) continue;
 
       const creeps = StructureCache.getCreeps(room);
+      const pendingJobFreshWindow = Math.max(
+        20,
+        Math.floor(config.SPAWN.JOB_TIMEOUT / 3),
+      );
+      const roomJobs = activeJobs.filter((j) => j.room === roomName);
+      const validJob = (job: ActiveJob): boolean => {
+        const fresh =
+          typeof job.createdAt !== "number" ||
+          Game.time - job.createdAt <= pendingJobFreshWindow;
+        if (!fresh) return false;
+        if (
+          typeof job.bodyCost === "number" &&
+          job.bodyCost > room.energyCapacityAvailable
+        ) {
+          return false;
+        }
+        return true;
+      };
+      const queuedRoleCount = (role: string): number => {
+        return roomJobs.filter((j) => j.role === role && validJob(j)).length;
+      };
 
       const count = (role: string) => {
         return (
           creeps.filter((c) => c.memory.role === role).length +
-          activeJobs.filter((j) => j.role === role && j.room === roomName)
-            .length
+          queuedRoleCount(role)
         );
       };
 
@@ -376,7 +407,6 @@ export class SpawnerProcess extends Process {
         Game.cpu.bucket < config.POPULATION.CPU_BUCKET_STOP_NON_CRITICAL;
       const mode = room.memory.strategy?.mode;
       const rcl = room.controller.level;
-      const roomJobs = activeJobs.filter((j) => j.room === roomName);
 
       const extBuilt = room.find(FIND_MY_STRUCTURES, {
         filter: (s) => s.structureType === STRUCTURE_EXTENSION,
@@ -395,7 +425,7 @@ export class SpawnerProcess extends Process {
       Debug.gauge(`room.${room.name}.struct.tower`, towerBuilt);
       Debug.gauge(`room.${room.name}.struct.towerDesired`, towerDesired);
 
-      if (creeps.length < 2 && workerCount === 0) {
+      if (creeps.length < 2 && actualWorkerCount === 0) {
         const minBody = [WORK, CARRY, MOVE];
         const minCost = bodyCost(minBody);
 
@@ -570,8 +600,11 @@ export class SpawnerProcess extends Process {
       const workerBodySize = buildWorkerBody(
         room.energyCapacityAvailable,
       ).length;
+      const queuedWorkers = queuedRoleCount("worker");
       const effectiveWorkerCount =
-        workerCount - getDyingCount("worker", workerBodySize);
+        actualWorkerCount -
+        getDyingCount("worker", workerBodySize) +
+        queuedWorkers;
 
       if (effectiveWorkerCount < target) {
         const recoveryThreshold = target * 0.8;

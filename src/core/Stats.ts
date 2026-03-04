@@ -1,3 +1,5 @@
+import { TrafficManager } from "./TrafficManager";
+
 type CpuStats = {
   bucket: number;
   used: number;
@@ -39,6 +41,11 @@ export function recordCpuStats(stats: CpuStats): void {
   const mem = ensureStats();
   mem.cpu = stats;
   mem.time = Game.time;
+}
+
+export function recordTrafficStats(): void {
+  const mem = ensureStats();
+  mem.traffic = TrafficManager.getTelemetrySnapshot();
 }
 
 /**

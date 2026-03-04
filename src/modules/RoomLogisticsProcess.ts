@@ -22,8 +22,15 @@ type AssignedTask = {
   targetId?: string;
   resourceType?: ResourceConstant;
 };
+type WorkerStickyTask = {
+  type: SupportedTask;
+  targetId?: string;
+  resourceType?: ResourceConstant;
+  until: number;
+};
 
 const sourceSlotsCache: Record<string, number> = {};
+const WORKER_STICKY_TICKS = 10;
 
 function getMyRooms(): Room[] {
   const rooms: Room[] = [];
@@ -685,6 +692,83 @@ function assignTask(
   return { type: "upgrade" };
 }
 
+function hasStore(value: unknown): value is { store: StoreDefinition } {
+  if (!value || typeof value !== "object") return false;
+  return "store" in value;
+}
+
+function getWorkerStickyTask(creep: Creep): WorkerStickyTask | null {
+  const mem = creep.memory as CreepMemory & { workerStickyTask?: WorkerStickyTask };
+  const sticky = mem.workerStickyTask;
+  if (!sticky) return null;
+  if (typeof sticky.until !== "number" || sticky.until < Game.time) {
+    delete mem.workerStickyTask;
+    return null;
+  }
+  return sticky;
+}
+
+function clearWorkerStickyTask(creep: Creep): void {
+  const mem = creep.memory as CreepMemory & { workerStickyTask?: WorkerStickyTask };
+  delete mem.workerStickyTask;
+}
+
+function rememberWorkerStickyTask(creep: Creep, task: AssignedTask): void {
+  const mem = creep.memory as CreepMemory & { workerStickyTask?: WorkerStickyTask };
+  mem.workerStickyTask = {
+    type: task.type,
+    targetId: task.targetId,
+    resourceType: task.resourceType,
+    until: Game.time + WORKER_STICKY_TICKS,
+  };
+}
+
+function canRunStickyTask(creep: Creep, task: WorkerStickyTask): boolean {
+  if (task.until < Game.time) return false;
+  const freeEnergy = creep.store.getFreeCapacity(RESOURCE_ENERGY);
+  const usedEnergy = creep.store.getUsedCapacity(RESOURCE_ENERGY);
+  const resType = task.resourceType ?? RESOURCE_ENERGY;
+
+  if (task.type === "upgrade") {
+    return usedEnergy > 0 && !!creep.room.controller?.my;
+  }
+  if (task.type === "build") {
+    if (usedEnergy <= 0 || !task.targetId) return false;
+    const site = Game.getObjectById(task.targetId as Id<ConstructionSite>);
+    return site instanceof ConstructionSite;
+  }
+  if (task.type === "harvest") {
+    if (freeEnergy <= 0 || !task.targetId) return false;
+    const source = Game.getObjectById(task.targetId as Id<Source>);
+    return source instanceof Source && source.energy > 0;
+  }
+  if (task.type === "pickup") {
+    if (creep.store.getFreeCapacity() <= 0 || !task.targetId) return false;
+    const resource = Game.getObjectById(task.targetId as Id<Resource>);
+    return resource instanceof Resource && resource.amount > 0;
+  }
+  if (task.type === "withdraw") {
+    if (creep.store.getFreeCapacity() <= 0 || !task.targetId) return false;
+    const target = Game.getObjectById(
+      task.targetId as Id<Structure | Tombstone | Ruin>,
+    );
+    if (!target || !hasStore(target)) return false;
+    return target.store.getUsedCapacity(resType) > 0;
+  }
+  if (task.type === "transfer") {
+    if (!task.targetId) return false;
+    const target = Game.getObjectById(
+      task.targetId as Id<Structure | Tombstone | Ruin>,
+    );
+    if (!target || !hasStore(target)) return false;
+    return (
+      creep.store.getUsedCapacity(resType) > 0 &&
+      target.store.getFreeCapacity(resType) > 0
+    );
+  }
+  return false;
+}
+
 /**
  * 房间物流进程
  *
@@ -724,6 +808,16 @@ export class RoomLogisticsProcess extends Process {
           }
         }
 
+        const stickyTask = getWorkerStickyTask(creep);
+        if (stickyTask && canRunStickyTask(creep, stickyTask)) {
+          this.spawnTask(creep, stickyTask);
+          if (stickyTask.type === "upgrade") counts.upgrade++;
+          if (stickyTask.type === "build") counts.build++;
+          if (stickyTask.type === "transfer") counts.transfer++;
+          continue;
+        }
+        if (stickyTask) clearWorkerStickyTask(creep);
+
         const newTask = assignTask(
           creep,
           assigned,
@@ -732,11 +826,13 @@ export class RoomLogisticsProcess extends Process {
           logisticsSupport,
         );
         if (newTask) {
+          rememberWorkerStickyTask(creep, newTask);
           this.spawnTask(creep, newTask);
           if (newTask.type === "upgrade") counts.upgrade++;
           if (newTask.type === "build") counts.build++;
           if (newTask.type === "transfer") counts.transfer++;
         } else {
+          clearWorkerStickyTask(creep);
           idleWorkerCount++;
         }
       }

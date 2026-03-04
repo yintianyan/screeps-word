@@ -14,7 +14,11 @@ import { TerminalProcess } from "./modules/TerminalProcess";
 import { LabProcess } from "./modules/science/LabProcess";
 import { PowerProcess } from "./modules/science/PowerProcess";
 import { ErrorMapper } from "./core/ErrorMapper";
-import { recordCpuStats, recordRoomStats } from "./core/Stats";
+import {
+  recordCpuStats,
+  recordRoomStats,
+  recordTrafficStats,
+} from "./core/Stats";
 import {
   ensureCreepMemoryDefaults,
   gcCreepMemory,
@@ -146,6 +150,7 @@ export const loop = ErrorMapper.wrapLoop(() => {
       limit: Game.cpu.limit,
       scheduler: loopEnd - loopStart,
     });
+    recordTrafficStats();
 
     if (Game.cpu.bucket >= config.CPU.BUCKET_LIMIT && Game.time % 5 === 0) {
       for (const roomName in Game.rooms) {

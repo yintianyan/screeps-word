@@ -12,9 +12,8 @@ export function runHeal(creep: Creep, targetId?: string): TaskRunResult {
   const result = creep.heal(target);
   if (result === OK) return { status: "running" };
   if (result === ERR_NOT_IN_RANGE) {
-    const moveResult = smartMove(creep, target, { reusePath: 5, range: 1 });
-    if (moveResult === ERR_NO_PATH)
-      return { status: "failed", reason: "pathBlocked" };
+    const moveResult = smartMove(creep, target, { reusePath: 10, range: 1 });
+    if (moveResult === ERR_NO_PATH) return { status: "running" };
     return { status: "running" };
   }
   if (result === ERR_INVALID_TARGET) return { status: "failed", reason: "targetInvalid" };

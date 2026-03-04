@@ -31,8 +31,8 @@ export function runClaim(creep: Creep, targetId?: string): TaskRunResult {
   if (result === OK) return { status: "running" };
   
   if (result === ERR_NOT_IN_RANGE) {
-    const moveResult = smartMove(creep, target, { reusePath: 20, range: 1 });
-    if (moveResult === ERR_NO_PATH) return { status: "failed", reason: "pathBlocked" };
+    const moveResult = smartMove(creep, controller, { reusePath: 10, range: 1 });
+    if (moveResult === ERR_NO_PATH) return { status: "running" };
     return { status: "running" };
   }
   
